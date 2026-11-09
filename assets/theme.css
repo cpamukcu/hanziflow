@@ -324,14 +324,15 @@ label.lbl{display:block;font-size:13px;color:var(--ink-2);margin:12px 0 4px 4px;
   .stats-panels .card{margin:0}
   .stats-panels .card:last-child{grid-column:span 2;max-width:360px;justify-self:center;width:100%}
   .screen.narrow{max-width:720px;margin-inline:auto}
+  /* Floats in the vertical middle of the window, whatever the page length. */
   nav.tabs{
-    position:sticky; top:24px; left:auto; right:auto; bottom:auto; transform:none;
-    width:84px; height:calc(100vh - 48px); min-height:380px; flex-direction:column; align-items:center;
+    position:fixed; top:50%; bottom:auto; right:auto; left:max(24px,calc(50vw - 536px)); transform:translateY(-50%);
+    width:84px; height:max-content; flex-direction:column; align-items:center;
     border-radius:42px; padding:10px; gap:6px;
   }
-  /* Equal square targets; the bubble is exactly one target, Settings sits at the foot. */
+  #app{grid-column:2}
+  /* Equal square targets; the bubble is exactly one target. */
   nav.tabs button{flex:0 0 64px;width:64px;justify-content:center;padding:0;gap:3px;font-size:10.5px;letter-spacing:.1px}
-  nav.tabs button[data-tab="settings"]{margin-top:auto}
   nav.tabs .ti{width:22px;height:22px;stroke-width:1.7}
   .bubble{top:10px;left:10px;border-radius:50%}
   .grade-bar,.save-area{bottom:16px}

@@ -1,5 +1,5 @@
 /* sw.js — offline cache. CACHE_ID is stamped by tools/stamp_sw.mjs; run `npm run stamp` before committing. */
-const CACHE_ID = "hanziflow-v2-989443e4b9";
+const CACHE_ID = "hanziflow-v2-572a498d39";
 const SHELL = [
   "./", "index.html", "assets/theme.css", "vendor/chart.umd.min.js", "vendor/pinyin-pro.min.js",
   "data/dictionary.js", "js/lookup.js", "js/srs.js", "js/app.js"
