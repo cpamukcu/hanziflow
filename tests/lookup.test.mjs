@@ -68,6 +68,29 @@ eq(r6.confidence, 'low', 'gibberish confidence low');
 const r7 = HF.lookup('朋友们');
 ok(r7.word === '朋友' || r7.needsReview === false, '朋友们 fuzzy-resolves to 朋友 (or at least resolves)');
 
+/* ---------- full dictionary (dictionary-extra.js) and data quality ---------- */
+ok(!HF.lookup('你好').ex[0].z.includes('祝你好运'), '你好 example is not the false match 祝你好运');
+require(path.join(ROOT, 'data', 'dictionary-extra.js'));
+for (const w of ['快递', '马马虎虎', '支付宝', '高铁', '网购', '入乡随俗', '人工智能', '微信', '外卖']) {
+  const r = HF.lookup(w);
+  ok(r.p && r.m && r.ex[0] && r.ex[0].z.includes(w) && r.ex[0].y && r.ex[0].e && !r.needsReview, w + ' fills everything');
+}
+eq(HF.lookup('马马虎虎').p, 'mǎ ma hū hū', 'reading comes from CEDICT');
+const rareWord = HF.lookup('蓝藻');
+ok(rareWord.m && rareWord.ex[0].source === 'generic' && !rareWord.needsReview, 'rare word still gets a labelled generic example');
+eq(HF.statusOf(rareWord), 'dictionary', 'rare word status');
+eq(HF.statusOf(HF.lookup('苹果')), 'curated', '苹果 status');
+eq(HF.statusOf({ p: 'x', m: '', sources: [] }), 'pinyin', 'pinyin-only status');
+eq(HF.statusOf({ p: '', m: '', sources: [] }), 'missing', 'not-found status');
+eq(HF.normalizeList('苹果 环境 保护'), ['苹果', '环境', '保护'], 'single spaces split words');
+eq(HF.normalizeList('苹果银行图书馆经济'), ['苹果', '银行', '图书馆', '经济'], 'unbroken run is segmented');
+eq(HF.normalizeList('1. 图书馆  túshūguǎn  library'), ['图书馆'], 'numbered with glosses');
+eq(HF.normalizeList('圖書館，你好！所以…').slice(0, 1), ['图书馆'], 'traditional list head');
+ok(HF.normalizeList('圖書館，你好！所以…').includes('所以'), 'exclamation separated words kept');
+ok(HF.suggest('图书').some(s => s.word === '图书馆'), 'suggest finds 图书馆 by prefix');
+const fv = HF.extractFromText('我今天去图书馆看书，因为明天要考试。').map(c => c.word);
+for (const w of ['今天', '图书馆', '看书', '因为', '明天', '考试']) ok(fv.includes(w), 'free text finds ' + w);
+
 /* ---------- extractFromText ---------- */
 const cands = HF.extractFromText('我今天去图书馆看书');
 const words = cands.map(c => c.word);

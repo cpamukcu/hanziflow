@@ -29,4 +29,5 @@ Generated: 2026-11-09 by `tools/build_data.mjs`.
 ## Curated HSK examples
 
 - The curated HSK 1–4 entries (`src: "curated"`, examples marked `source: "curated"`)
-  are **original to this project** and may be used under the project's own license.
+  and the modern-word examples in `tools/modern_examples.json` are **original to this
+  project** and may be used under the project's own license.

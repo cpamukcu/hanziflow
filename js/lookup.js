@@ -16,8 +16,37 @@
     var D = data();
     if (D.entries && D.entries[word]) return D.entries[word];
     var X = extra();
-    if (X && X.entries && X.entries[word]) return X.entries[word];
+    if (X && X.entries && X.entries[word]) return expandRow(word, X.entries[word]);
     return null;
+  }
+  /* dictionary-extra.js stores compact rows: [p, m, traditional, [z,y,e,source]|0, heteronym] */
+  function expandRow(word, row) {
+    if (!Array.isArray(row)) return row;
+    var e = { w: word, p: row[0], m: row[1], src: "cedict",
+      senses: row[1] ? row[1].split("; ") : [] };
+    if (row[2]) e.t = row[2];
+    if (row[3]) e.ex = [{ z: row[3][0], y: row[3][1], e: row[3][2], source: row[3][3] || "tatoeba" }];
+    if (row[4]) e.heteronym = true;
+    return e;
+  }
+  /* Loads the full-dictionary tail once; resolves true/false and never rejects. */
+  var extraPromise = null;
+  function ensureExtra() {
+    if (extra()) return Promise.resolve(true);
+    if (typeof document === "undefined") return Promise.resolve(false);
+    if (extraPromise) return extraPromise;
+    extraPromise = new Promise(function (resolve) {
+      var el = document.createElement("script");
+      el.src = "data/dictionary-extra.js?v=" + HF.version;
+      el.onload = function () { resolve(!!extra()); };
+      el.onerror = function () {
+        console.warn("[HF] data/dictionary-extra.js failed to load");
+        extraPromise = null;
+        resolve(false);
+      };
+      document.head.appendChild(el);
+    });
+    return extraPromise;
   }
   function getSentences(word) {
     var D = data();
@@ -26,7 +55,12 @@
     if (X && X.sentences && X.sentences[word]) return X.sentences[word];
     return null;
   }
-  function tradMap() { return data().trad2simp || {}; }
+  function tradLookup(key) {
+    var main = data().trad2simp || {};
+    if (main[key]) return main[key];
+    var X = extra();
+    return X && X.trad2simp ? X.trad2simp[key] : undefined;
+  }
 
   function isHanzi(ch) { return HANZI.test(ch); }
 
@@ -50,16 +84,16 @@
 
   /* ---------- simplify: traditional -> simplified ---------- */
   function simplify(text) {
-    var map = tradMap();
     var chars = Array.from(text);
     var out = "";
     for (var i = 0; i < chars.length; i++) {
       var matched = false;
       for (var len = Math.min(MAX_WORD_LEN, chars.length - i); len >= 2; len--) {
         var seg = chars.slice(i, i + len).join("");
-        if (map[seg]) { out += map[seg]; i += len - 1; matched = true; break; }
+        var hit = tradLookup(seg);
+        if (hit) { out += hit; i += len - 1; matched = true; break; }
       }
-      if (!matched) out += (map[chars[i]] || chars[i]);
+      if (!matched) out += (tradLookup(chars[i]) || chars[i]);
     }
     return out;
   }
@@ -69,14 +103,25 @@
   var RE_ENUM = /^\s*(?:[-*+>]|\d{1,3}\s*[.)、．:：]|[（(]?\d{1,3}\)|[①-⑳])\s*/;
   var RE_BRACKETS = /[（(【\[][^（()）【\]\[]*[）)】\]]/g;
 
-  function maximalCjkRun(token) {
-    var best = "", cur = "";
-    for (var i = 0; i < token.length; i++) {
-      var ch = token[i];
-      if (isHanzi(ch)) { cur += ch; if (cur.length > best.length) best = cur; }
-      else cur = "";
+  function cjkRuns(token) {
+    var runs = [], cur = "";
+    for (var ch of token) {
+      if (isHanzi(ch)) cur += ch;
+      else { if (cur) runs.push(cur); cur = ""; }
     }
-    return best;
+    if (cur) runs.push(cur);
+    return runs;
+  }
+  /* A long unbroken run that is not itself a word ("苹果环境保护经济") is segmented. */
+  function splitRun(run) {
+    if (run.length < 5 || getEntry(run)) return [run];
+    var parts = [], i = 0;
+    while (i < run.length) {
+      var hit = entryAt(run, i);
+      if (hit) { parts.push(hit.word); i += hit.len; }
+      else { parts.push(run[i]); i++; }
+    }
+    return parts.every(function (p) { return p.length === 1; }) ? [run] : parts;
   }
 
   function normalizeList(raw) {
@@ -85,17 +130,21 @@
     for (var i = 0; i < tokens.length; i++) {
       var t = tokens[i].replace(RE_ENUM, "").replace(RE_BRACKETS, " ").trim();
       if (!t) continue;
-      var run = maximalCjkRun(t);
-      if (!run) continue;
-      var w = simplify(run);
-      if (!w || seen[w]) continue;
-      seen[w] = true;
-      out.push(w);
-      if (out.length >= NORMALIZE_CAP) {
-        var msg = "[HF] normalizeList: capped at " + NORMALIZE_CAP + " words";
-        console.warn(msg);
-        HF.lastWarning = msg;
-        break;
+      var runs = cjkRuns(t);
+      for (var r = 0; r < runs.length; r++) {
+        var words = splitRun(simplify(runs[r]));
+        for (var k = 0; k < words.length; k++) {
+          var w = words[k];
+          if (!w || seen[w]) continue;
+          seen[w] = true;
+          out.push(w);
+          if (out.length >= NORMALIZE_CAP) {
+            var msg = "Only the first " + NORMALIZE_CAP + " words were kept";
+            console.warn("[HF] normalizeList: " + msg);
+            HF.lastWarning = msg;
+            return out;
+          }
+        }
       }
     }
     return out;
@@ -167,7 +216,60 @@
   }
 
   /* ---------- lookup ---------- */
-  function stripSense(m) { return String(m || "").trim(); }
+  /* Always grammatical, clearly labelled as generic in the UI. */
+  function genericExample(word, p) {
+    return [{
+      z: "「" + word + "」是什么意思？",
+      y: "「" + p + "」 shì shénme yìsi?",
+      e: "What does “" + word + "” mean?",
+      source: "generic"
+    }];
+  }
+
+  /* Unknown compound: gloss it from the words it is made of (still flagged for review). */
+  function piecedMeaning(w) {
+    var parts = [], i = 0;
+    while (i < w.length) {
+      var hit = entryAt(w, i);
+      if (hit) { parts.push(hit.entry); i += hit.len; continue; }
+      var one = getEntry(w[i]);
+      if (!one) return "";
+      parts.push(one); i++;
+    }
+    if (parts.length < 2) return "";
+    return parts.map(function (e) { return String(e.m || "").split(/[;,]/)[0].trim(); }).join(" + ");
+  }
+
+  /* Prefix suggestions for the single-card form: curated first, then shortest. */
+  function suggest(prefix, limit) {
+    var w = simplify(String(prefix || "").trim());
+    if (!w) return [];
+    limit = limit || 6;
+    var hits = [], add = function (bag) {
+      if (!bag) return;
+      for (var k in bag) { if (k !== w && k.lastIndexOf(w, 0) === 0) hits.push(k); }
+    };
+    add(data().entries);
+    var mainCount = hits.length;
+    if (mainCount < limit && extra()) add(extra().entries);
+    hits.sort(function (a, b) {
+      var ca = (data().entries[a] || {}).src === "curated" ? 0 : 1;
+      var cb = (data().entries[b] || {}).src === "curated" ? 0 : 1;
+      return ca - cb || a.length - b.length || a.localeCompare(b, "zh");
+    });
+    return hits.slice(0, limit).map(function (k) {
+      var e = getEntry(k);
+      return { word: k, p: e.p, m: e.m };
+    });
+  }
+
+  /* curated | dictionary | pinyin | missing — drives the status chip. */
+  function statusOf(row) {
+    if (row.m && (row.sources || []).indexOf("curated") >= 0) return "curated";
+    if (row.m && !row.pieced) return "dictionary";
+    if (row.m || row.p) return "pinyin";
+    return "missing";
+  }
 
   function entryToRow(word, entry, opts) {
     opts = opts || {};
@@ -184,6 +286,7 @@
       var sent = getSentences(word);
       if (sent && sent.length) ex = sent.slice(0, 1);
     }
+    if (!ex || !ex[0] || !ex[0].z) ex = genericExample(word, p);
     var heteronym = !!entry.heteronym;
     var confidence = opts.confidence || (isCurated ? "high" : (m && ex ? "high" : "medium"));
     var needsReview = false;
@@ -191,7 +294,11 @@
     if (!ex || !ex[0] || !ex[0].z) { needsReview = true; notes.push("no example sentence found"); ex = ex || []; }
     if (heteronym && confidence === "high") confidence = "medium";
     if (heteronym) notes.push("heteronym: multiple readings");
-    if (!isCurated && sources.indexOf(entry.src) < 0) sources.push(entry.src);
+    if (ex[0] && ex[0].source === "generic") {
+      notes.push("no real sentence found; generic example used");
+      if (confidence === "high") confidence = "medium";
+    }
+    if (entry.src && sources.indexOf(entry.src) < 0) sources.push(entry.src);
     return {
       word: word,
       traditional: opts.traditional || entry.t || null,
@@ -244,12 +351,15 @@
 
     // 4. pinyin only
     var p = py(w);
-    notes.push("no dictionary entry; pinyin generated locally");
+    var pieced = piecedMeaning(w);
+    notes.push(pieced ? "not in dictionary; meaning pieced together from its parts"
+                      : "no dictionary entry; pinyin generated locally");
     return {
       word: w, traditional: null,
       p: p, pa: p ? p.split(" ") : [],
-      m: "", senses: [], h: null, ex: [],
-      confidence: "low", sources: sources,
+      m: pieced, senses: pieced ? [pieced] : [], h: null,
+      ex: p && pieced ? genericExample(w, p) : [],
+      confidence: "low", sources: sources, pieced: !!pieced,
       needsReview: true, notes: notes, heteronym: false
     };
   }
@@ -316,6 +426,9 @@
     simplify: simplify,
     isHanzi: isHanzi,
     dedupe: dedupe,
+    ensureExtra: ensureExtra,
+    suggest: suggest,
+    statusOf: statusOf,
     debug: function (raw) {
       var words = Array.isArray(raw) ? raw : normalizeList(raw);
       return enrichBatch(words).then(function (rows) {

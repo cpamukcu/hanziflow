@@ -32,8 +32,7 @@ const TOOLS = __dirname;
 const require = createRequire(path.join(ROOT, 'tools', 'build_data.mjs'));
 
 const MAIN_BUDGET = 2.9 * 1024 * 1024;   // dictionary.js hard cap (spec: <= 3 MB)
-const EXTRA_BUDGET = 2.9 * 1024 * 1024;  // dictionary-extra.js cap
-const CEDICT_TARGET = 20000;             // spec: top 20k most common CEDICT entries
+const EXTRA_BUDGET = 12 * 1024 * 1024;   // dictionary-extra.js cap (lazy-loaded, compact rows)
 const MAX_SENSES = 3;
 const MAX_EXAMPLES = 2;
 const EX_MIN_HANZI = 6, EX_MAX_HANZI = 28;
@@ -269,9 +268,12 @@ async function main() {
 
   const pinyinPro = require(path.join(ROOT, 'vendor', 'pinyin-pro.min.js'));
   const toPinyin = text => {
-    try { return pinyinPro.pinyin(text, { toneType: 'symbol', type: 'array' }).join(' '); }
-    catch { return ''; }
+    try {
+      return pinyinPro.pinyin(text, { toneType: 'symbol', type: 'array' }).join(' ')
+        .replace(/ ([，。！？；：、”’）》,.!?;:)])/g, '$1').replace(/([“‘（《(]) /g, '$1');
+    } catch { return ''; }
   };
+  if (!toPinyin('苹果')) throw new Error('pinyin-pro failed to load; refusing to write data without pinyin');
   const multiReading = word => {
     try {
       return pinyinPro.polyphonic(word).some(t => t.trim().includes(' '));
@@ -302,10 +304,29 @@ async function main() {
   const trie = buildTrie(forms);
   const freq = new Map();               // word -> #sentences containing it
   const byWord = new Map();             // word -> [{z,e,h,simpHit}]
+  // Traditional-only characters: such sentences are unsuitable for simplified cards.
+  const tradOnly = new Set();
+  for (const [simp, e] of cedict) {
+    if (simp.length === 1) for (const t of e.t) if (t.length === 1 && t !== simp) tradOnly.add(t);
+  }
+  for (const ch of cedict.keys()) if (ch.length === 1) tradOnly.delete(ch);
+  // A sentence only illustrates a word when the word sits on segment boundaries:
+  // 祝|你|好运 must not count as an example of 你好.
+  const segmenter = new Intl.Segmenter('zh', { granularity: 'word' });
+  const onBoundaries = (z, bounds, w) => {
+    for (let i = z.indexOf(w); i >= 0; i = z.indexOf(w, i + 1)) {
+      if (bounds.has(i) && bounds.has(i + w.length)) return true;
+    }
+    return false;
+  };
   for (const s of sentences) {
     const found = new Set();
     scanSentence(trie, s.z, found);
+    if ([...s.z].some(ch => tradOnly.has(ch))) continue;
+    const bounds = new Set([s.z.length]);
+    for (const seg of segmenter.segment(s.z)) bounds.add(seg.index);
     for (const w of found) {
+      if (!onBoundaries(s.z, bounds, w)) continue;
       freq.set(w, (freq.get(w) || 0) + 1);
       let arr = byWord.get(w);
       if (!arr) { arr = []; byWord.set(w, arr); }
@@ -316,8 +337,32 @@ async function main() {
   const cedictWords = [...cedict.keys()].filter(w => !curatedMap.has(w));
   cedictWords.sort((a, b) =>
     (freq.get(b) || 0) - (freq.get(a) || 0) || a.length - b.length || a.localeCompare(b, 'zh'));
-  const ranked = [...curated.map(c => c.w), ...cedictWords.slice(0, CEDICT_TARGET)];
-  console.log(`  ranked ${ranked.length} headwords (${curated.length} curated + ${Math.min(CEDICT_TARGET, cedictWords.length)} CEDICT)`);
+  const ranked = [...curated.map(c => c.w), ...cedictWords.filter(w => /^[\u3400-\u9fff\uf900-\ufaff]+$/.test(w))];
+  console.log(`  ranked ${ranked.length} headwords (${curated.length} curated + ${ranked.length - curated.length} CEDICT)`);
+
+  const modernPack = JSON.parse(fs.readFileSync(path.join(TOOLS, 'modern_examples.json'), 'utf8'));
+  // CEDICT's own reading is more reliable than guessing when a word has just one.
+  const TONES = { a: 'āáǎà', e: 'ēéěè', i: 'īíǐì', o: 'ōóǒò', u: 'ūúǔù', 'ü': 'ǖǘǚǜ' };
+  const markSyllable = syl => {
+    const m = syl.match(/^(.*?)([1-5])$/);
+    if (!m) return syl;
+    let [, base, t] = m; t = +t;
+    base = base.replace(/u:/gi, c => (c[0] === 'U' ? 'Ü' : 'ü')).replace(/v/g, 'ü');
+    if (t === 5) return base;
+    const low = base.toLowerCase();
+    let i = low.search(/[ae]/);
+    if (i < 0) i = low.indexOf('ou');
+    if (i < 0) { for (let k = low.length - 1; k >= 0; k--) if (TONES[low[k]]) { i = k; break; } }
+    if (i < 0) return base;
+    const mark = TONES[low[i]][t - 1];
+    return base.slice(0, i) + (base[i] === low[i] ? mark : mark.toUpperCase()) + base.slice(i + 1);
+  };
+  const cedictToMarks = r => r.split(' ').map(markSyllable).join(' ').replace(/ ?· ?/g, ' ');
+  const cleanSense = s => s.replace(/([^\s|\[]+)\|[^\s\[]+/g, '$1').replace(/\[([a-zA-Z0-9: ]+)\]/g, '').trim();
+  const usableSenses = list => {
+    const good = list.filter(x => !/^(CL:|variant of|old variant|Taiwan pr\.|also pr\.|also written)/i.test(x));
+    return (good.length ? good : list).map(cleanSense);
+  };
 
   // ---- pick example sentences (shortest, simple grammar, prefer simplified)
   const pickExamples = w => {
@@ -372,13 +417,18 @@ async function main() {
         sentencesOut[w] = [{ z: x.z, y: toPinyin(x.z), e: x.e, source: 'tatoeba' }];
       }
     } else {
-      entry.p = toPinyin(w);
+      const readings = ced ? [...new Set(ced.readings.map(r => r.toLowerCase()))] : [];
+      entry.p = readings.length === 1 ? cedictToMarks(ced.readings[0]) : toPinyin(w);
       entry.pa = entry.p ? entry.p.split(' ') : [];
-      const senses = ced ? ced.senses.slice(0, MAX_SENSES) : [];
+      const senses = ced ? usableSenses(ced.senses).slice(0, MAX_SENSES) : [];
       entry.m = senses.slice(0, 2).join('; ');
       entry.senses = senses;
       entry.src = 'cedict';
-      if (examples.length) {
+      if (modernPack[w]) {
+        const x = modernPack[w];
+        exMap[w] = [{ z: x.z, y: toPinyin(x.z), e: x.e, source: 'curated' }];
+        entry.src = 'cedict';
+      } else if (examples.length) {
         const x = examples[0];
         exMap[w] = [{ z: x.z, y: toPinyin(x.z), e: x.e, source: 'tatoeba' }];
       }
@@ -437,18 +487,19 @@ async function main() {
     }
     return data;
   };
-  const buildExtra = (upto, exCount) => {
+  // Compact rows keep ~120k entries practical: word -> [p, m, traditional, example, heteronym]
+  const buildExtra = () => {
     const d = {
       version: '2.0.0', generatedAt,
-      meta: { licenses: 'see data/LICENSES.md', note: 'lazy-loaded CEDICT tail; merge into HF_DATA at runtime' },
-      entries: {}, sentences: {}, trad2simp: {},
+      meta: { licenses: 'see data/LICENSES.md', note: 'lazy-loaded CEDICT tail; rows are [p,m,t,[z,y,e]|0,heteronym]; expanded by js/lookup.js' },
+      entries: {}, trad2simp: {},
     };
-    const tail = ranked.slice(keep, upto);
-    let attached = 0;
-    for (const w of tail) {
-      const e = { ...entries[w] };
-      if (attached < exCount && exMap[w]) { e.ex = exMap[w]; attached++; }
-      d.entries[w] = e;
+    for (const w of ranked.slice(keep)) {
+      const e = entries[w];
+      const x = exMap[w] && exMap[w][0];
+      const row = [e.p, e.m, e.t || 0, x ? [x.z, x.y, x.e, x.source] : 0];
+      if (e.heteronym) row.push(1);
+      d.entries[w] = row;
     }
     for (const [t, s] of Object.entries(trad2simp)) {
       if (d.entries[s]) d.trad2simp[t] = s;
@@ -471,23 +522,9 @@ async function main() {
     keep = lo;
     mainData = buildMain(keep);
     mainJs = wrap('HF_DATA', mainData);
-    // lean tail size
-    let lo2 = keep, hi2 = ranked.length;
-    while (lo2 < hi2) {
-      const mid = Math.ceil((lo2 + hi2) / 2);
-      if (Buffer.byteLength(wrap('HF_DATA_EXTRA', buildExtra(mid, 0))) <= EXTRA_BUDGET) lo2 = mid; else hi2 = mid - 1;
-    }
-    const upto = lo2;
-    // examples for the tail while the budget allows
-    const tailWithEx = ranked.slice(keep, upto).filter(w => exMap[w]).length;
-    let lo3 = 0, hi3 = tailWithEx;
-    while (lo3 < hi3) {
-      const mid = Math.ceil((lo3 + hi3) / 2);
-      if (Buffer.byteLength(wrap('HF_DATA_EXTRA', buildExtra(upto, mid))) <= EXTRA_BUDGET) lo3 = mid; else hi3 = mid - 1;
-    }
-    extraData = buildExtra(upto, lo3);
-    const dropped = ranked.length - upto;
-    if (dropped) console.log(`  note: ${dropped} lowest-ranked CEDICT entries dropped (extra budget)`);
+    extraData = buildExtra();
+    const extraSize = Buffer.byteLength(wrap('HF_DATA_EXTRA', extraData));
+    if (extraSize > EXTRA_BUDGET) throw new Error(`dictionary-extra.js is ${extraSize} bytes, over budget`);
   }
 
   fs.mkdirSync(path.join(ROOT, 'data'), { recursive: true });
@@ -533,15 +570,16 @@ Generated: ${today} by \`tools/build_data.mjs\`.
 ## Curated HSK examples
 
 - The curated HSK 1–4 entries (\`src: "curated"\`, examples marked \`source: "curated"\`)
-  are **original to this project** and may be used under the project's own license.
+  and the modern-word examples in \`tools/modern_examples.json\` are **original to this
+  project** and may be used under the project's own license.
 `);
 
   // ---- report
   const size = f => (fs.statSync(path.join(ROOT, 'data', f)).size / 1024 / 1024).toFixed(2) + ' MB';
   const sentenceCount = Object.keys(mainData.sentences).length +
-    (extraData ? Object.keys(extraData.sentences).length : 0);
+    (extraData ? 0 : 0);
   const withExamples = Object.values(mainData.entries).filter(e => e.ex).length +
-    (extraData ? Object.values(extraData.entries).filter(e => e.ex).length : 0);
+    (extraData ? Object.values(extraData.entries).filter(e => e[3]).length : 0);
   console.log('== build complete ==');
   console.log(`entries:      ${Object.keys(mainData.entries).length} (main) + ${extraData ? Object.keys(extraData.entries).length : 0} (extra)`);
   console.log(`with examples: ${withExamples}; sentences map keys: ${sentenceCount}`);
