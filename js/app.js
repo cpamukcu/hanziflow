@@ -82,6 +82,15 @@ function speak(text){
 function $(s){return document.querySelector(s)}
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function toast(msg){const t=$("#toast");t.textContent=msg;t.classList.add("show");clearTimeout(t._tm);t._tm=setTimeout(()=>t.classList.remove("show"),2200)}
+let _pinyinWarned=false;
+function hfPinyin(text,opts){
+  if(typeof window.pinyinPro==="undefined"||!window.pinyinPro||typeof window.pinyinPro.pinyin!=="function"){
+    if(!_pinyinWarned){_pinyinWarned=true;console.warn("[HanziFlow] hfPinyin: pinyin-pro unavailable");toast("Pinyin engine unavailable — check vendor/pinyin-pro.min.js")}
+    return"";
+  }
+  try{return window.pinyinPro.pinyin(text,opts||{toneType:"symbol"})}
+  catch(e){console.warn("[HanziFlow] hfPinyin failed for:",text,e);return""}
+}
 function newSRS(){return{e:2.5,ivl:0,due:dayStart(),reps:0,lapses:0}}
 function stageOf(c){
   const s=c.srs;
@@ -261,8 +270,7 @@ function startPaste(deckId){
     const rows=lines.map(w=>{
       const hit=dictMap[w];
       if(hit)return{w,p:hit.p,m:hit.m,h:hit.h,s:Object.assign({},hit.s),auto:false};
-      let p="";
-      try{if(window.pinyinPro)p=pinyinPro.pinyin(w,{toneType:"symbol"})}catch(e){}
+      let p=hfPinyin(w);
       return{w,p,m:"",h:3,s:{z:"",y:"",e:""},auto:true};
     });
     reviewRows(deckId,rows);
@@ -333,7 +341,7 @@ function cardForm(c,deckId){
   $("#cf-w").oninput=e=>{ // live tone preview via pinyin-pro if empty
     const w=e.target.value.trim();
     if(w&&!$("#cf-p").value){const hit=dictMap[w];if(hit){$("#cf-p").value=hit.p;if(!$("#cf-m").value)$("#cf-m").value=hit.m;if(!$("#cf-z").value){$("#cf-z").value=hit.s.z;$("#cf-y").value=hit.s.y;$("#cf-e").value=hit.s.e}}
-      else if(window.pinyinPro){try{$("#cf-p").value=pinyinPro.pinyin(w,{toneType:"symbol"})}catch(x){}}}
+      else{const gp=hfPinyin(w);if(gp)$("#cf-p").value=gp;}}
   };
   $("#cf-save").onclick=()=>{
     const data={w:$("#cf-w").value.trim(),p:$("#cf-p").value.trim(),m:$("#cf-m").value.trim(),h:+$("#cf-h").value,
@@ -565,8 +573,9 @@ go("home");
 /* ============ boot guard ============ */
 (function(){
   const missing=[];
-  if(typeof window.pinyinPro==="undefined")missing.push("pinyin-pro");
-  if(typeof window.Chart==="undefined")missing.push("Chart.js");
+  if(Array.isArray(window.HF_MISSING_DEPS)&&window.HF_MISSING_DEPS.length)missing.push(...window.HF_MISSING_DEPS);
+  if(typeof window.pinyinPro==="undefined"&&!missing.includes("pinyin-pro"))missing.push("pinyin-pro");
+  if(typeof window.Chart==="undefined"&&!missing.includes("chart.js"))missing.push("chart.js");
   if(!missing.length)return;
   console.warn("[HanziFlow] missing dependencies: "+missing.join(", "));
   const banner=document.createElement("div");
