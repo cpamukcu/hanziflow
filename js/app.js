@@ -576,6 +576,7 @@ go("home");
   if(Array.isArray(window.HF_MISSING_DEPS)&&window.HF_MISSING_DEPS.length)missing.push(...window.HF_MISSING_DEPS);
   if(typeof window.pinyinPro==="undefined"&&!missing.includes("pinyin-pro"))missing.push("pinyin-pro");
   if(typeof window.Chart==="undefined"&&!missing.includes("chart.js"))missing.push("chart.js");
+  if(typeof window.HF_DATA==="undefined"&&!missing.includes("dictionary data"))missing.push("dictionary data (data/dictionary.js)");
   if(!missing.length)return;
   console.warn("[HanziFlow] missing dependencies: "+missing.join(", "));
   const banner=document.createElement("div");

@@ -1,0 +1,9 @@
+# raw build-time downloads (re-fetched by tools/build_data.mjs when missing)
+tools/cedict.zip
+tools/cedict_ts.u8
+tools/cedict_all.js
+tools/cedict_simplified.js
+tools/cedict_traditional.js
+tools/*.tsv
+tools/*.bz2
+.DS_Store
