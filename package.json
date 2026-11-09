@@ -1,0 +1,10 @@
+{
+  "name": "hanziflow",
+  "version": "2.0.0",
+  "private": true,
+  "scripts": {
+    "test": "node tests/lookup.test.mjs && node tests/srs.test.mjs && node tools/stamp_sw.mjs --check",
+    "stamp": "node tools/stamp_sw.mjs",
+    "build:data": "node tools/build_data.mjs"
+  }
+}
