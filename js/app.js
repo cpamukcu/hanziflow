@@ -367,8 +367,9 @@ function bindAddHeader(deckId,keep){
 function leaveAdd(deckId){if(deckId&&S.decks.some(d=>d.id===deckId))openWeek(deckId);else go("home")}
 function startPaste(deckId,initial){
   $("#add-flow").innerHTML=`<div class="card">${addHeader(deckId,"list")}
-      <textarea id="paste-box" class="zh" aria-label="Word list" placeholder="Paste in any format:&#10;苹果&#10;1. 环境&#10;保护，经济；牛奶&#10;图书馆  túshūguǎn  library&#10;圖書館">${esc(initial||"")}</textarea>
+      <textarea id="paste-box" class="zh" aria-label="Word list" placeholder="Paste in any format:&#10;苹果&#10;shui guo&#10;1. 环境&#10;保护，经济；牛奶&#10;图书馆  túshūguǎn  library&#10;圖書館">${esc(initial||"")}</textarea>
       <div class="detected" id="paste-count" aria-live="polite"></div>
+      <div id="pinyin-picks"></div>
       <button class="btn" id="btn-lookup">Auto-fill →</button>
       <div style="height:8px"></div>
       <button class="btn ghost" id="btn-add-cancel">Cancel</button>
@@ -378,11 +379,31 @@ function startPaste(deckId,initial){
   const box=$("#paste-box");
   const words=()=>HF.normalizeList(box.value);
   const count=()=>{const n=words().length;$("#paste-count").innerHTML=n?`<b>${n}</b> word${n===1?"":"s"} detected`:"Pinyin, meaning, HSK level and an example fill in automatically."};
-  box.oninput=count;count();box.focus();
+  let queries=[];
+  async function renderPicks(){
+    queries=HF.latinQueries(box.value);
+    const wrap=$("#pinyin-picks");
+    if(!queries.length){wrap.innerHTML="";return}
+    await HF.ensureExtra();
+    if(!$("#pinyin-picks"))return;
+    wrap.innerHTML=queries.map((q,qi)=>{
+      const hits=HF.search(q);
+      return`<div class="pick-group"><div class="muted">${hits.length?`Which word do you mean by <b>${esc(q)}</b>?`:`Nothing found for <b>${esc(q)}</b>. Check the spelling.`}</div>
+        <div class="suggest">${hits.map(h=>`<button type="button" data-q="${qi}" data-word="${esc(h.word)}"><span class="zh">${esc(h.word)}</span> <span class="muted">${esc(h.p)} · ${esc(h.m)}</span></button>`).join("")}</div></div>`;
+    }).join("");
+    wrap.querySelectorAll("[data-word]").forEach(b=>b.onclick=()=>{
+      box.value=box.value.replace(queries[+b.dataset.q],b.dataset.word);
+      count();renderPicks();box.focus();
+    });
+  }
+  let pickTimer=null;
+  box.oninput=()=>{count();clearTimeout(pickTimer);pickTimer=setTimeout(renderPicks,250)};
+  count();renderPicks();box.focus();
   $("#btn-add-cancel").onclick=()=>leaveAdd(deck());
   $("#btn-lookup").onclick=()=>{
     const list=words();
-    if(!list.length)return toast("Paste some Chinese words first");
+    if(HF.latinQueries(box.value).length)return toast("Tap the word you mean in the list below");
+    if(!list.length)return toast("Type or paste some words first");
     if(HF.lastWarning){toast(HF.lastWarning);HF.lastWarning=null}
     runEnrich(deck(),list);
   };
@@ -530,7 +551,7 @@ function cardForm(c,deckId){
   const shell=isNew?addHeader(deckId,"manual"):`<h2 style="margin-top:0">Edit card</h2>`;
   $("#add-flow").innerHTML=`
     <div class="card">${shell}
-      <label class="lbl" for="cf-w">Chinese word 汉字</label><input type="text" id="cf-w" class="zh" autocomplete="off" value="${esc(c.w)}">
+      <label class="lbl" for="cf-w">Chinese word or pinyin</label><input type="text" id="cf-w" class="zh" autocomplete="off" value="${esc(c.w)}">
       <div class="suggest" id="cf-suggest"></div>
       <div class="detected" id="cf-status" aria-live="polite">${isNew?"Type or paste a word — the rest fills in by itself.":""}</div>
       <label class="lbl" for="cf-p">Pinyin (tone marks)</label><input type="text" id="cf-p" value="${esc(c.p)}">
@@ -570,9 +591,14 @@ function cardForm(c,deckId){
     const list=HF.normalizeList(raw);
     if(list.length>1&&isNew)return startPaste(deck(),raw);
     const box=$("#cf-suggest");
-    if(!list.length){box.innerHTML="";return}
     await HF.ensureExtra();
     if(!$("#cf-w"))return;
+    if(!list.length){
+      const pick=word=>{$("#cf-w").value=word;lastWord=word;box.innerHTML="";fill(word,true)};
+      box.innerHTML=HF.search(raw).map(x=>`<button type="button" data-word="${esc(x.word)}"><span class="zh">${esc(x.word)}</span> <span class="muted">${esc(x.p)} · ${esc(x.m)}</span></button>`).join("");
+      box.querySelectorAll("[data-word]").forEach(b=>b.onclick=()=>pick(b.dataset.word));
+      return;
+    }
     const w=list[0];
     box.innerHTML=HF.suggest(w).map(x=>`<button type="button" data-word="${esc(x.word)}"><span class="zh">${esc(x.word)}</span> <span class="muted">${esc(x.p)} · ${esc(x.m)}</span></button>`).join("");
     box.querySelectorAll("[data-word]").forEach(b=>b.onclick=()=>{$("#cf-w").value=b.dataset.word;box.innerHTML="";fill(b.dataset.word,true)});

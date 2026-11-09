@@ -246,6 +246,7 @@ label.lbl{display:block;font-size:13px;color:var(--ink-2);margin:12px 0 4px 4px;
 .cand .zh{font-size:18px;font-weight:600}
 .cand .muted{margin-left:auto;font-size:12.5px}
 .save-area{position:sticky;bottom:calc(92px + env(safe-area-inset-bottom));z-index:5;background:var(--solid);border:1px solid var(--glass-stroke);border-radius:var(--radius-sm);padding:12px;margin-top:12px;box-shadow:var(--glass-shadow)}
+.pick-group{margin:0 0 14px}
 .save-btns{display:flex;gap:8px}
 .save-btns .ghost{flex:0 0 auto;width:auto;padding-inline:20px}
 .save-hint{font-size:13px;color:var(--warn);margin-bottom:8px}

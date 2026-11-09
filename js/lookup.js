@@ -263,6 +263,71 @@
     });
   }
 
+  /* ---------- search by pinyin or English ---------- */
+  function pinyinKey(text) {
+    return String(text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase().replace(/v/g, "u").replace(/[^a-z]/g, "");
+  }
+  var pinyinIndex = null, pinyinIndexSize = -1;
+  function getPinyinIndex() {
+    var X = extra();
+    var size = X ? 1 : 0;
+    if (pinyinIndex && pinyinIndexSize === size) return pinyinIndex;
+    var idx = new Map();
+    var add = function (w, p) {
+      var k = pinyinKey(p);
+      if (!k) return;
+      if (!idx.has(k)) idx.set(k, []);
+      idx.get(k).push(w);
+    };
+    var main = data().entries || {};
+    for (var w in main) add(w, main[w].p);
+    if (X) for (var w2 in X.entries) add(w2, X.entries[w2][0]);
+    pinyinIndex = idx; pinyinIndexSize = size;
+    return idx;
+  }
+  /* Most common first: curated, then core dictionary order, then the rest; names last. */
+  function searchRank(words) {
+    return words.map(function (w, i) {
+      var e = getEntry(w);
+      var cur = (data().entries[w] || {}).src === "curated" ? 0 : 1;
+      var name = /^[A-ZĀÁǍÀĒÉĚÈŌÓǑÒ]/.test(e.p || "") ? 1 : 0;
+      return { w: w, e: e, r: name * 2 + cur, i: i };
+    }).sort(function (a, b) { return a.r - b.r || a.i - b.i; });
+  }
+  function search(query, limit) {
+    limit = limit || 8;
+    var q = String(query || "").trim();
+    if (!q) return [];
+    var hits = [];
+    var key = pinyinKey(q);
+    if (key) hits = (getPinyinIndex().get(key) || []).slice();
+    var out = searchRank(hits).slice(0, limit);
+    if (out.length < limit && /^[a-zA-Z][a-zA-Z' -]*$/.test(q) && q.length >= 2) {
+      // English meaning, whole-word match, core dictionary only (keeps results sensible).
+      var re = new RegExp("\\b" + q.replace(/[^a-zA-Z' -]/g, "") + "\\b", "i");
+      var main = data().entries || {}, more = [];
+      for (var w in main) if (re.test(main[w].m || "") && hits.indexOf(w) < 0) more.push(w);
+      // Exact gloss beats a word that merely mentions it.
+      var exact = function (w) { return String(main[w].m).toLowerCase().split(/[;,]/)[0].replace(/^to /, "").trim() === q.toLowerCase() ? 0 : 1; };
+      more.sort(function (a, b) { return exact(a) - exact(b); });
+      out = out.concat(searchRank(more).sort(function (a, b) { return exact(a.w) - exact(b.w) || a.r - b.r || a.i - b.i; }).slice(0, limit - out.length));
+    }
+    return out.map(function (h) { return { word: h.w, p: h.e.p, m: h.e.m }; });
+  }
+  /* Lines with no Chinese at all are search terms, e.g. "shui guo" or "shuǐguǒ, fruit". */
+  function latinQueries(raw) {
+    var out = [];
+    String(raw == null ? "" : raw).split(/\r?\n/).forEach(function (line) {
+      if (Array.from(line).some(isHanzi)) return;
+      line.split(/[,，、;；|／\/\t　]| {2,}|[•·・◦▪∙]/).forEach(function (t) {
+        var q = t.replace(RE_ENUM, "").trim();
+        if (/[a-zA-Z\u00c0-\u024f]/.test(q) && out.indexOf(q) < 0) out.push(q);
+      });
+    });
+    return out;
+  }
+
   /* curated | dictionary | pinyin | missing — drives the status chip. */
   function statusOf(row) {
     if (row.m && (row.sources || []).indexOf("curated") >= 0) return "curated";
@@ -428,6 +493,8 @@
     dedupe: dedupe,
     ensureExtra: ensureExtra,
     suggest: suggest,
+    search: search,
+    latinQueries: latinQueries,
     statusOf: statusOf,
     debug: function (raw) {
       var words = Array.isArray(raw) ? raw : normalizeList(raw);

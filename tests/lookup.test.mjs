@@ -91,6 +91,14 @@ ok(HF.suggest('图书').some(s => s.word === '图书馆'), 'suggest finds 图书
 const fv = HF.extractFromText('我今天去图书馆看书，因为明天要考试。').map(c => c.word);
 for (const w of ['今天', '图书馆', '看书', '因为', '明天', '考试']) ok(fv.includes(w), 'free text finds ' + w);
 
+/* ---------- search ---------- */
+for (const q of ['shui guo', 'shuiguo', 'shuǐ guǒ', 'shui3 guo3', 'SHUI GUO']) ok(HF.search(q)[0].word === '水果', q + ' finds 水果 first');
+ok(HF.search('fruit').some(h => h.word === '水果'), 'English fruit finds 水果');
+ok(HF.search('nv ren').some(h => h.word === '女人'), 'v works for ü');
+eq(HF.search('qqqzzz'), [], 'nonsense finds nothing');
+eq(HF.latinQueries('shui guo\n苹果\n1. ping guo, fruit'), ['shui guo', 'ping guo', 'fruit'], 'latin lines become queries');
+eq(HF.latinQueries('图书馆  túshūguǎn  library'), [], 'glosses beside hanzi are not queries');
+
 /* ---------- extractFromText ---------- */
 const cands = HF.extractFromText('我今天去图书馆看书');
 const words = cands.map(c => c.word);
