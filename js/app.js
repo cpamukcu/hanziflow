@@ -50,7 +50,10 @@ function load(){
     loadProblem="Your saved data could not be read. A raw copy was kept in this browser; restore a backup from Settings if you have one.";
   }
 }
+const syncHashes={};
 function save(){
+  window.HFSync.stamp(S,syncHashes);
+  scheduleSync();
   try{localStorage.setItem(KEY,JSON.stringify(S))}
   catch(e){console.warn("[HanziFlow] save failed",e);toast("Could not save — browser storage is full")}
 }
@@ -213,6 +216,7 @@ function go(name){
   if(name==="stats")renderStats();
   if(name==="settings")renderSettings();
   window.scrollTo(0,0);
+  if(syncPending&&!syncBusyScreen())syncNow();
 }
 document.querySelectorAll("nav.tabs button").forEach(b=>b.onclick=()=>{
   if(b.dataset.tab==="study")startStudy(null);else go(b.dataset.tab);
@@ -812,6 +816,7 @@ function renderStats(){
 
 /* ============ settings ============ */
 function renderSettings(){
+  renderSyncCard();
   $("#set-target").value=S.settings.target;
   $("#set-newcap").value=S.settings.newCap;
   $("#set-dark").checked=S.settings.theme==="dark";
@@ -861,7 +866,7 @@ $("#file-import").onchange=e=>{
     const mode=await hfDialog({title:"Import backup",body:`${data.decks.length} decks and ${data.cards.length} cards found.`,
       actions:[{label:"Merge — add what's missing",value:"merge"},{label:"Replace everything",kind:"danger",value:"replace"},{label:"Cancel",kind:"ghost",value:null}]});
     if(!mode)return;
-    if(mode==="replace"){S=migrateV1toV2(data);toast("Backup restored")}
+    if(mode==="replace"){S=Object.assign(migrateV1toV2(data),{deleted:S.deleted||{}});toast("Backup restored")}
     else toast(`Merged — ${mergeBackup(data)} new cards`);
     save();setTheme(S.settings.theme);go("home");repairBlankCards();
   };
@@ -870,7 +875,10 @@ $("#file-import").onchange=e=>{
 $("#btn-reset").onclick=()=>{
   if(!confirm("Erase ALL decks, cards and progress? This cannot be undone."))return;
   if(!confirm("Really delete everything?"))return;
-  S=defaultState();localStorage.removeItem(KEY_V1);save();setTheme("light");toast("All data erased");go("home");
+  // Resets this device only: no deletions are sent, so synced devices keep their cards.
+  S=defaultState();localStorage.removeItem(KEY_V1);window.HFSync.baseline(S,syncHashes);
+  if(syncCfg.token){syncCfg.token="";syncCfg.gistId="";saveSyncCfg()}
+  save();setTheme("light");toast("All data on this device erased");go("home");
 };
 $("#theme-toggle").onclick=()=>setTheme(S.settings.theme==="dark"?"light":"dark");
 function setTheme(t){
@@ -902,12 +910,131 @@ async function repairBlankCards(){
   if(fixed){save();toast(`Completed ${fixed} older card${fixed===1?"":"s"} from the dictionary`);if(curScreen==="home")renderHome()}
 }
 
+/* ============ device sync (private GitHub Gist) ============ */
+const SYNC_KEY="hanziflow.sync",SYNC_FILE="hanziflow.json",SYNC_DESC="HanziFlow sync";
+let syncCfg={token:"",gistId:"",last:0,error:""};
+try{syncCfg=Object.assign(syncCfg,JSON.parse(localStorage.getItem(SYNC_KEY)||"{}"))}catch(e){console.warn("[HanziFlow] sync settings unreadable",e)}
+function saveSyncCfg(){localStorage.setItem(SYNC_KEY,JSON.stringify(syncCfg))}
+let syncTimer=null,syncRunning=false,syncPending=false;
+const syncBusyScreen=()=>["study","quiz","add"].includes(curScreen); // never swap data under an open card
+function scheduleSync(){
+  if(!syncCfg.token)return;
+  clearTimeout(syncTimer);
+  syncTimer=setTimeout(()=>{if(syncBusyScreen())syncPending=true;else syncNow()},3000);
+}
+async function gh(path,opts={}){
+  const res=await fetch("https://api.github.com"+path,Object.assign({},opts,{headers:{
+    Authorization:"Bearer "+syncCfg.token,Accept:"application/vnd.github+json","Content-Type":"application/json"}}));
+  if(!res.ok){
+    const err=new Error(res.status===401?"GitHub rejected the token. Create a new one and connect again.":
+      res.status===403||res.status===404?"The token can't use Gists. Make sure the “gist” box was ticked.":"GitHub error "+res.status);
+    err.status=res.status;throw err;
+  }
+  return res.status===204?null:res.json();
+}
+async function findSyncGist(){
+  for(let page=1;page<=10;page++){
+    const list=await gh(`/gists?per_page=100&page=${page}`);
+    const hit=list.find(x=>x.description===SYNC_DESC&&x.files&&x.files[SYNC_FILE]);
+    if(hit)return hit.id;
+    if(list.length<100)return "";
+  }
+  return "";
+}
+async function readSyncGist(id){
+  const gist=await gh("/gists/"+id);
+  const f=gist.files&&gist.files[SYNC_FILE];
+  if(!f)return null;
+  const text=f.truncated?await (await fetch(f.raw_url)).text():f.content;
+  return JSON.parse(text);
+}
+async function syncNow(manual){
+  if(!syncCfg.token||syncRunning)return;
+  if(syncBusyScreen()){syncPending=true;return}
+  syncRunning=true;syncPending=false;renderSyncStatus("Syncing…");
+  try{
+    if(!syncCfg.gistId)syncCfg.gistId=await findSyncGist();
+    let remote=null;
+    if(syncCfg.gistId)remote=await readSyncGist(syncCfg.gistId);
+    const before=JSON.stringify({d:S.decks,c:S.cards});
+    if(remote&&Array.isArray(remote.cards)){
+      const merged=window.HFSync.merge(S,migrateV1toV2(remote));
+      S=Object.assign(normalizeState(merged),{deleted:merged.deleted,settingsU:merged.settingsU});
+    }
+    window.HFSync.baseline(S,syncHashes);
+    localStorage.setItem(KEY,JSON.stringify(S));
+    const payload=JSON.stringify(S);
+    if(!syncCfg.gistId){
+      const g=await gh("/gists",{method:"POST",body:JSON.stringify({description:SYNC_DESC,public:false,files:{[SYNC_FILE]:{content:payload}}})});
+      syncCfg.gistId=g.id;
+    }else if(!remote||JSON.stringify(remote)!==payload){
+      await gh("/gists/"+syncCfg.gistId,{method:"PATCH",body:JSON.stringify({files:{[SYNC_FILE]:{content:payload}}})});
+    }
+    syncCfg.last=Date.now();syncCfg.error="";saveSyncCfg();
+    if(before!==JSON.stringify({d:S.decks,c:S.cards})&&!syncBusyScreen())go(curScreen==="week-detail"?"weeks":curScreen);
+    if(manual)toast("Synced");
+  }catch(e){
+    console.warn("[HanziFlow] sync failed",e);
+    if(e.status===404)syncCfg.gistId=""; // the gist was deleted; find or create it next time
+    syncCfg.error=e.status?e.message:"Couldn't reach GitHub. Changes stay on this device and sync later.";
+    saveSyncCfg();
+    if(manual)toast(syncCfg.error);
+  }finally{syncRunning=false;renderSyncStatus()}
+}
+function ago(t){
+  const s=Math.round((Date.now()-t)/1000);
+  return s<60?"just now":s<3600?Math.round(s/60)+" min ago":s<86400?Math.round(s/3600)+" h ago":new Date(t).toLocaleDateString();
+}
+function renderSyncStatus(msg){
+  const el=$("#sync-status");if(!el)return;
+  el.textContent=msg||(syncCfg.error?syncCfg.error:syncCfg.last?"Last synced "+ago(syncCfg.last):"Not synced yet");
+  el.classList.toggle("bad",!msg&&!!syncCfg.error);
+}
+function renderSyncCard(){
+  const box=$("#sync-card");
+  if(syncCfg.token){
+    box.innerHTML=`<div class="row between"><b>Sync between devices</b><span class="chip curated">On</span></div>
+      <p class="muted" id="sync-status"></p>
+      <div class="row" style="gap:8px"><button class="btn small" id="sync-now">Sync now</button>
+      <button class="btn small ghost" id="sync-off">Turn off on this device</button></div>`;
+    $("#sync-now").onclick=()=>syncNow(true);
+    $("#sync-off").onclick=async()=>{
+      const yes=await hfDialog({title:"Turn off sync here?",body:"Your cards stay on this device and in the cloud copy. Other devices keep syncing.",
+        actions:[{label:"Turn off",kind:"danger",value:true},{label:"Cancel",kind:"ghost",value:false}]});
+      if(yes){syncCfg={token:"",gistId:"",last:0,error:""};saveSyncCfg();renderSyncCard()}
+    };
+    renderSyncStatus();return;
+  }
+  box.innerHTML=`<b>Sync between devices</b>
+    <p class="muted">Keep your PC and iPhone in step. Your cards are saved to a private Gist on your own GitHub account; nobody else can see it.</p>
+    <ol class="about-list">
+      <li><a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=HanziFlow%20sync" target="_blank" rel="noopener">Create a GitHub token</a> with only the “gist” box ticked, and copy it.</li>
+      <li>Paste it below on this device, then do the same on your other device.</li>
+    </ol>
+    <input type="password" id="sync-token" aria-label="GitHub token" placeholder="ghp_…" autocomplete="off" style="margin-top:10px">
+    <div style="height:8px"></div>
+    <button class="btn" id="sync-connect">Connect</button>`;
+  $("#sync-connect").onclick=async()=>{
+    const token=$("#sync-token").value.trim();
+    if(!token)return toast("Paste your token first");
+    syncCfg={token,gistId:"",last:0,error:""};
+    $("#sync-connect").textContent="Connecting…";
+    try{await gh("/gists?per_page=1")}
+    catch(e){syncCfg.token="";toast(e.status?e.message:"Couldn't reach GitHub");$("#sync-connect").textContent="Connect";return}
+    saveSyncCfg();renderSyncCard();await syncNow(true);
+  };
+}
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")syncNow()});
+window.addEventListener("online",()=>syncNow());
+
 /* ============ init ============ */
 load();
+window.HFSync.baseline(S,syncHashes);
 setTheme(S.settings.theme||"light");
 go("home");
 if(loadProblem){$("#scr-home").insertAdjacentHTML("afterbegin",`<div class="notice">${esc(loadProblem)}</div>`)}
 repairBlankCards();
+syncNow();
 if("serviceWorker" in navigator&&(location.protocol==="https:"||location.hostname==="localhost"||location.hostname==="127.0.0.1")){
   // A new version takes over while the page loads: reload once so nobody runs stale files.
   const hadController=!!navigator.serviceWorker.controller;
