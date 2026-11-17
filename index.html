@@ -10,6 +10,7 @@
 <script>window.HF_MISSING_DEPS=[];</script>
 <script defer src="vendor/chart.umd.min.js?v=2.0.0" onerror="window.HF_MISSING_DEPS.push('chart.js')"></script>
 <script defer src="vendor/pinyin-pro.min.js?v=2.0.0" onerror="window.HF_MISSING_DEPS.push('pinyin-pro')"></script>
+<script defer src="vendor/hanzi-writer.min.js?v=2.0.0" onerror="window.HF_MISSING_DEPS.push('hanzi-writer')"></script>
 <link rel="stylesheet" href="assets/theme.css?v=2.0.0">
 </head>
 <body>
@@ -119,6 +120,7 @@
       <div class="row between" style="margin-top:14px"><b>New cards per session</b>
         <input type="number" id="set-newcap" aria-label="New cards per session" min="0" max="100" style="width:80px;text-align:center"></div>
     </div>
+    <div class="card" id="sync-card"></div>
     <div class="card">
       <b>Backup &amp; restore</b>
       <p class="muted">All data lives in this browser's localStorage. Export regularly!</p>
@@ -141,6 +143,7 @@
 <script defer src="data/dictionary.js?v=2.0.0" onerror="window.HF_MISSING_DEPS.push('dictionary data')"></script>
 <script defer src="js/lookup.js?v=2.0.0" onerror="window.HF_MISSING_DEPS.push('lookup engine')"></script>
 <script defer src="js/srs.js?v=2.0.0" onerror="window.HF_MISSING_DEPS.push('srs engine')"></script>
+<script defer src="js/sync.js?v=2.0.0" onerror="window.HF_MISSING_DEPS.push('sync engine')"></script>
 <script defer src="js/app.js?v=2.0.0"></script>
 </body>
 </html>

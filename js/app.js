@@ -50,7 +50,10 @@ function load(){
     loadProblem="Your saved data could not be read. A raw copy was kept in this browser; restore a backup from Settings if you have one.";
   }
 }
+const syncHashes={};
 function save(){
+  window.HFSync.stamp(S,syncHashes);
+  scheduleSync();
   try{localStorage.setItem(KEY,JSON.stringify(S))}
   catch(e){console.warn("[HanziFlow] save failed",e);toast("Could not save — browser storage is full")}
 }
@@ -138,6 +141,7 @@ const ICON={
   trash:svg('<path d="M4.500 7h15M9.500 7V4.500h5V7M6.500 7l1 13h9l1-13"/>'),
   redo:svg('<path d="M19 5v5h-5"/><path d="M19 10a7.500 7.500 0 1 0 .8 5"/>'),
   sun:svg('<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.600 5.600 7 7M17 17l1.400 1.400M5.600 18.400 7 17M17 7l1.400-1.400"/>'),
+  write:'<span class="ico-zh zh" aria-hidden="true">写</span>',
   moon:svg('<path d="M20 14.500A8.500 8.500 0 0 1 9.500 4a8.500 8.500 0 1 0 10.500 10.500Z"/>')
 };
 let _pinyinWarned=false;
@@ -213,6 +217,7 @@ function go(name){
   if(name==="stats")renderStats();
   if(name==="settings")renderSettings();
   window.scrollTo(0,0);
+  if(syncPending&&!syncBusyScreen())syncNow();
 }
 document.querySelectorAll("nav.tabs button").forEach(b=>b.onclick=()=>{
   if(b.dataset.tab==="study")startStudy(null);else go(b.dataset.tab);
@@ -323,6 +328,7 @@ function cardRowHTML(c){
     <div class="hw zh">${colorHanzi(c.w,c.p)}</div>
     <div class="det"><div class="p">${colorPinyin(c.p)}</div><div class="m">${esc(c.m)||'<i>no meaning yet</i>'}</div></div>
     <span class="stage ${st}">${st}</span>
+    <button class="audio-btn small" data-write="${esc(c.w)}" data-write-py="${esc(c.p)}" aria-label="Stroke order for ${esc(c.w)}" title="Stroke order">${ICON.write}</button>
     <button class="audio-btn small" data-say="${esc(c.w)}" aria-label="Listen to ${esc(c.w)}">${ICON.say}</button>
   </div>`;
 }
@@ -642,6 +648,108 @@ function cardForm(c,deckId){
 }
 $("#btn-add-card").onclick=()=>{cardForm(null,latestDeck().id)};
 
+/* ============ stroke order (Hanzi Writer) ============ */
+/* Stroke data comes from the hanzi-writer-data package on jsDelivr; sw.js keeps a copy of each character after first use. */
+const STROKE_URL="https://cdn.jsdelivr.net/npm/hanzi-writer-data@2.0.1/";
+const strokeCache={};
+function loadStrokes(ch){
+  if(!strokeCache[ch])strokeCache[ch]=fetch(STROKE_URL+encodeURIComponent(ch)+".json")
+    .then(r=>{if(!r.ok)throw new Error(r.status===404?"missing":"HTTP "+r.status);return r.json()})
+    .catch(e=>{delete strokeCache[ch];throw e});
+  return strokeCache[ch];
+}
+const GRID_SVG=`<svg class="wr-grid" viewBox="0 0 100 100" aria-hidden="true"><rect x="1" y="1" width="98" height="98" rx="6"/>
+  <path d="M50 1V99M1 50H99"/><path class="diag" d="M1 1 99 99M99 1 1 99"/></svg>`;
+function openWriter(word,pinyin){
+  if(typeof window.HanziWriter==="undefined")return toast("Stroke animations are unavailable — vendor/hanzi-writer.min.js did not load");
+  const chars=[...String(word||"")].filter(ch=>HANZI_RE.test(ch));
+  if(!chars.length)return toast("No Chinese characters to write");
+  const tones=tonesFor(chars.join(""),pinyin);
+  const syls=splitSyllables(pinyin);
+  const charPinyin=i=>syls.length===chars.length?syls[i]:hfPinyin(chars[i]);
+  const root=$("#dialog-root"),prev=document.activeElement;
+  const size=Math.max(180,Math.min(280,window.innerWidth-96));
+  root.innerHTML=`<div class="overlay"><div class="dialog writer-dlg" role="dialog" aria-modal="true" aria-labelledby="wr-t">
+    <div class="row between"><h3 id="wr-t">Stroke order</h3>
+      <button class="icon-btn" id="wr-x" aria-label="Close">✕</button></div>
+    ${chars.length>1?`<div class="wr-chars" role="tablist" aria-label="Characters">${chars.map((ch,i)=>
+      `<button role="tab" class="zh t${tones[i]||0}" data-ci="${i}" aria-label="${esc(ch)}">${esc(ch)}</button>`).join("")}</div>`:""}
+    <div class="wr-py" id="wr-py"></div>
+    <div class="wr-stage" style="width:${size}px;height:${size}px">${GRID_SVG}<div id="wr-target"></div></div>
+    <div class="wr-msg" id="wr-msg" aria-live="polite"></div>
+    <div class="wr-acts">
+      <button class="btn small ghost" id="wr-play">▶ Watch</button>
+      <button class="btn small" id="wr-quiz">✍ Practice</button>
+      ${chars.length>1?'<button class="btn small ghost" id="wr-all">Whole word</button>':""}
+    </div>
+  </div></div>`;
+  let cur=0,writer=null,run=0,mode="watch";
+  const msg=t=>{const m=$("#wr-msg");if(m)m.textContent=t};
+  const color=v=>cssVar(v)||"#14212c";
+  function mount(i){
+    run++;cur=i;
+    if(writer){try{writer.cancelQuiz()}catch(e){}}
+    root.querySelectorAll("[data-ci]").forEach(b=>b.setAttribute("aria-selected",+b.dataset.ci===i?"true":"false"));
+    $("#wr-py").innerHTML=colorPinyin(charPinyin(i)||"");
+    const tgt=$("#wr-target");tgt.innerHTML="";
+    msg("Loading strokes…");
+    writer=HanziWriter.create(tgt,chars[i],{
+      width:size,height:size,padding:Math.round(size*.06),
+      showCharacter:false,showOutline:true,
+      strokeColor:color("--t"+(tones[i]||0)),outlineColor:color("--line"),
+      radicalColor:null,highlightColor:color("--accent-2"),drawingColor:color("--accent"),
+      strokeAnimationSpeed:1,delayBetweenStrokes:260,showHintAfterMisses:2,drawingWidth:Math.max(12,Math.round(size/18)),
+      charDataLoader:(ch,ok,fail)=>{loadStrokes(ch).then(ok,fail)},
+      onLoadCharDataSuccess:d=>{const n=d.strokes.length,label=`${n} stroke${n===1?"":"s"}`;
+        msg(mode==="quiz"?`Trace the ${label} in order. A hint appears after 2 misses.`:label)},
+      onLoadCharDataError:e=>msg(e&&e.message==="missing"?`No stroke data for ${chars[i]}.`:"Stroke data needs an internet connection the first time.")
+    });
+    return writer;
+  }
+  async function watch(i){
+    mode="watch";const my=mount(i),token=run;
+    try{await my.animateCharacter()}catch(e){}
+    return token===run;
+  }
+  async function watchAll(from){
+    for(let i=from;i<chars.length;i++){
+      if(!await watch(i))return;
+      const token=run;
+      if(i<chars.length-1)await new Promise(r=>setTimeout(r,450));
+      if(token!==run)return;
+    }
+  }
+  function practice(i){
+    mode="quiz";const my=mount(i),token=run;
+    my.quiz({
+      onMistake:s=>{if(token===run)msg(`Not quite — stroke ${s.strokeNum+1}. Try again.`)},
+      onCorrectStroke:s=>{if(token===run)msg(s.strokesRemaining?`Good! ${s.strokesRemaining} to go.`:"")},
+      onComplete:s=>{
+        if(token!==run)return;
+        const m=s.totalMistakes;
+        msg(m===0?"Perfect! 完美 🎉":`Done with ${m} mistake${m===1?"":"s"}.`);
+        if(i<chars.length-1)setTimeout(()=>{if(token===run&&mode==="quiz")practice(i+1)},1100);
+      }
+    });
+  }
+  const close=()=>{run++;if(writer){try{writer.cancelQuiz()}catch(e){}}root.innerHTML="";document.removeEventListener("keydown",onKey);if(prev&&prev.focus)prev.focus()};
+  const onKey=e=>{if(e.key==="Escape")close()};
+  document.addEventListener("keydown",onKey);
+  root.querySelector(".overlay").onclick=e=>{if(e.target.classList.contains("overlay"))close()};
+  $("#wr-x").onclick=close;
+  $("#wr-play").onclick=()=>watch(cur);
+  $("#wr-quiz").onclick=()=>practice(cur);
+  const all=$("#wr-all");if(all)all.onclick=()=>watchAll(0);
+  root.querySelectorAll("[data-ci]").forEach(b=>b.onclick=()=>mode==="quiz"?practice(+b.dataset.ci):watch(+b.dataset.ci));
+  $("#wr-play").focus();
+  watchAll(0);
+}
+/* Any [data-write] button opens the writer; capture phase so the card underneath doesn't flip or open. */
+document.addEventListener("click",e=>{
+  const b=e.target.closest("[data-write]");if(!b)return;
+  e.stopPropagation();openWriter(b.dataset.write,b.dataset.writePy||"");
+},true);
+
 /* ============ study ============ */
 let session=null;
 function startStudy(deckId){
@@ -666,7 +774,10 @@ function renderStudyCard(){
     <div class="study-wrap"><div class="flip" id="flip" role="button" tabindex="0" aria-label="Flip card">
       <div class="face front">
         <div class="big-hanzi zh">${colorHanzi(c.w,c.p)}</div>
-        <button class="audio-btn" data-say="${esc(c.w)}" aria-label="Listen">${ICON.say}</button>
+        <div class="row" style="justify-content:center;gap:10px">
+          <button class="audio-btn" data-say="${esc(c.w)}" aria-label="Listen">${ICON.say}</button>
+          <button class="audio-btn" data-write="${esc(c.w)}" data-write-py="${esc(c.p)}" aria-label="Show stroke order" title="Stroke order">${ICON.write}</button>
+        </div>
         <div class="flip-hint">Tap the card to reveal</div>
       </div>
       <div class="face back">
@@ -812,6 +923,7 @@ function renderStats(){
 
 /* ============ settings ============ */
 function renderSettings(){
+  renderSyncCard();
   $("#set-target").value=S.settings.target;
   $("#set-newcap").value=S.settings.newCap;
   $("#set-dark").checked=S.settings.theme==="dark";
@@ -861,7 +973,7 @@ $("#file-import").onchange=e=>{
     const mode=await hfDialog({title:"Import backup",body:`${data.decks.length} decks and ${data.cards.length} cards found.`,
       actions:[{label:"Merge — add what's missing",value:"merge"},{label:"Replace everything",kind:"danger",value:"replace"},{label:"Cancel",kind:"ghost",value:null}]});
     if(!mode)return;
-    if(mode==="replace"){S=migrateV1toV2(data);toast("Backup restored")}
+    if(mode==="replace"){S=Object.assign(migrateV1toV2(data),{deleted:S.deleted||{}});toast("Backup restored")}
     else toast(`Merged — ${mergeBackup(data)} new cards`);
     save();setTheme(S.settings.theme);go("home");repairBlankCards();
   };
@@ -870,7 +982,10 @@ $("#file-import").onchange=e=>{
 $("#btn-reset").onclick=()=>{
   if(!confirm("Erase ALL decks, cards and progress? This cannot be undone."))return;
   if(!confirm("Really delete everything?"))return;
-  S=defaultState();localStorage.removeItem(KEY_V1);save();setTheme("light");toast("All data erased");go("home");
+  // Resets this device only: no deletions are sent, so synced devices keep their cards.
+  S=defaultState();localStorage.removeItem(KEY_V1);window.HFSync.baseline(S,syncHashes);
+  if(syncCfg.token){syncCfg.token="";syncCfg.gistId="";saveSyncCfg()}
+  save();setTheme("light");toast("All data on this device erased");go("home");
 };
 $("#theme-toggle").onclick=()=>setTheme(S.settings.theme==="dark"?"light":"dark");
 function setTheme(t){
@@ -902,12 +1017,131 @@ async function repairBlankCards(){
   if(fixed){save();toast(`Completed ${fixed} older card${fixed===1?"":"s"} from the dictionary`);if(curScreen==="home")renderHome()}
 }
 
+/* ============ device sync (private GitHub Gist) ============ */
+const SYNC_KEY="hanziflow.sync",SYNC_FILE="hanziflow.json",SYNC_DESC="HanziFlow sync";
+let syncCfg={token:"",gistId:"",last:0,error:""};
+try{syncCfg=Object.assign(syncCfg,JSON.parse(localStorage.getItem(SYNC_KEY)||"{}"))}catch(e){console.warn("[HanziFlow] sync settings unreadable",e)}
+function saveSyncCfg(){localStorage.setItem(SYNC_KEY,JSON.stringify(syncCfg))}
+let syncTimer=null,syncRunning=false,syncPending=false;
+const syncBusyScreen=()=>["study","quiz","add"].includes(curScreen); // never swap data under an open card
+function scheduleSync(){
+  if(!syncCfg.token)return;
+  clearTimeout(syncTimer);
+  syncTimer=setTimeout(()=>{if(syncBusyScreen())syncPending=true;else syncNow()},3000);
+}
+async function gh(path,opts={}){
+  const res=await fetch("https://api.github.com"+path,Object.assign({},opts,{headers:{
+    Authorization:"Bearer "+syncCfg.token,Accept:"application/vnd.github+json","Content-Type":"application/json"}}));
+  if(!res.ok){
+    const err=new Error(res.status===401?"GitHub rejected the token. Create a new one and connect again.":
+      res.status===403||res.status===404?"The token can't use Gists. Make sure the “gist” box was ticked.":"GitHub error "+res.status);
+    err.status=res.status;throw err;
+  }
+  return res.status===204?null:res.json();
+}
+async function findSyncGist(){
+  for(let page=1;page<=10;page++){
+    const list=await gh(`/gists?per_page=100&page=${page}`);
+    const hit=list.find(x=>x.description===SYNC_DESC&&x.files&&x.files[SYNC_FILE]);
+    if(hit)return hit.id;
+    if(list.length<100)return "";
+  }
+  return "";
+}
+async function readSyncGist(id){
+  const gist=await gh("/gists/"+id);
+  const f=gist.files&&gist.files[SYNC_FILE];
+  if(!f)return null;
+  const text=f.truncated?await (await fetch(f.raw_url)).text():f.content;
+  return JSON.parse(text);
+}
+async function syncNow(manual){
+  if(!syncCfg.token||syncRunning)return;
+  if(syncBusyScreen()){syncPending=true;return}
+  syncRunning=true;syncPending=false;renderSyncStatus("Syncing…");
+  try{
+    if(!syncCfg.gistId)syncCfg.gistId=await findSyncGist();
+    let remote=null;
+    if(syncCfg.gistId)remote=await readSyncGist(syncCfg.gistId);
+    const before=JSON.stringify({d:S.decks,c:S.cards});
+    if(remote&&Array.isArray(remote.cards)){
+      const merged=window.HFSync.merge(S,migrateV1toV2(remote));
+      S=Object.assign(normalizeState(merged),{deleted:merged.deleted,settingsU:merged.settingsU});
+    }
+    window.HFSync.baseline(S,syncHashes);
+    localStorage.setItem(KEY,JSON.stringify(S));
+    const payload=JSON.stringify(S);
+    if(!syncCfg.gistId){
+      const g=await gh("/gists",{method:"POST",body:JSON.stringify({description:SYNC_DESC,public:false,files:{[SYNC_FILE]:{content:payload}}})});
+      syncCfg.gistId=g.id;
+    }else if(!remote||JSON.stringify(remote)!==payload){
+      await gh("/gists/"+syncCfg.gistId,{method:"PATCH",body:JSON.stringify({files:{[SYNC_FILE]:{content:payload}}})});
+    }
+    syncCfg.last=Date.now();syncCfg.error="";saveSyncCfg();
+    if(before!==JSON.stringify({d:S.decks,c:S.cards})&&!syncBusyScreen())go(curScreen==="week-detail"?"weeks":curScreen);
+    if(manual)toast("Synced");
+  }catch(e){
+    console.warn("[HanziFlow] sync failed",e);
+    if(e.status===404)syncCfg.gistId=""; // the gist was deleted; find or create it next time
+    syncCfg.error=e.status?e.message:"Couldn't reach GitHub. Changes stay on this device and sync later.";
+    saveSyncCfg();
+    if(manual)toast(syncCfg.error);
+  }finally{syncRunning=false;renderSyncStatus()}
+}
+function ago(t){
+  const s=Math.round((Date.now()-t)/1000);
+  return s<60?"just now":s<3600?Math.round(s/60)+" min ago":s<86400?Math.round(s/3600)+" h ago":new Date(t).toLocaleDateString();
+}
+function renderSyncStatus(msg){
+  const el=$("#sync-status");if(!el)return;
+  el.textContent=msg||(syncCfg.error?syncCfg.error:syncCfg.last?"Last synced "+ago(syncCfg.last):"Not synced yet");
+  el.classList.toggle("bad",!msg&&!!syncCfg.error);
+}
+function renderSyncCard(){
+  const box=$("#sync-card");
+  if(syncCfg.token){
+    box.innerHTML=`<div class="row between"><b>Sync between devices</b><span class="chip curated">On</span></div>
+      <p class="muted" id="sync-status"></p>
+      <div class="row" style="gap:8px"><button class="btn small" id="sync-now">Sync now</button>
+      <button class="btn small ghost" id="sync-off">Turn off on this device</button></div>`;
+    $("#sync-now").onclick=()=>syncNow(true);
+    $("#sync-off").onclick=async()=>{
+      const yes=await hfDialog({title:"Turn off sync here?",body:"Your cards stay on this device and in the cloud copy. Other devices keep syncing.",
+        actions:[{label:"Turn off",kind:"danger",value:true},{label:"Cancel",kind:"ghost",value:false}]});
+      if(yes){syncCfg={token:"",gistId:"",last:0,error:""};saveSyncCfg();renderSyncCard()}
+    };
+    renderSyncStatus();return;
+  }
+  box.innerHTML=`<b>Sync between devices</b>
+    <p class="muted">Keep your PC and iPhone in step. Your cards are saved to a private Gist on your own GitHub account; nobody else can see it.</p>
+    <ol class="about-list">
+      <li><a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=HanziFlow%20sync" target="_blank" rel="noopener">Create a GitHub token</a> with only the “gist” box ticked, and copy it.</li>
+      <li>Paste it below on this device, then do the same on your other device.</li>
+    </ol>
+    <input type="password" id="sync-token" aria-label="GitHub token" placeholder="ghp_…" autocomplete="off" style="margin-top:10px">
+    <div style="height:8px"></div>
+    <button class="btn" id="sync-connect">Connect</button>`;
+  $("#sync-connect").onclick=async()=>{
+    const token=$("#sync-token").value.trim();
+    if(!token)return toast("Paste your token first");
+    syncCfg={token,gistId:"",last:0,error:""};
+    $("#sync-connect").textContent="Connecting…";
+    try{await gh("/gists?per_page=1")}
+    catch(e){syncCfg.token="";toast(e.status?e.message:"Couldn't reach GitHub");$("#sync-connect").textContent="Connect";return}
+    saveSyncCfg();renderSyncCard();await syncNow(true);
+  };
+}
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")syncNow()});
+window.addEventListener("online",()=>syncNow());
+
 /* ============ init ============ */
 load();
+window.HFSync.baseline(S,syncHashes);
 setTheme(S.settings.theme||"light");
 go("home");
 if(loadProblem){$("#scr-home").insertAdjacentHTML("afterbegin",`<div class="notice">${esc(loadProblem)}</div>`)}
 repairBlankCards();
+syncNow();
 if("serviceWorker" in navigator&&(location.protocol==="https:"||location.hostname==="localhost"||location.hostname==="127.0.0.1")){
   // A new version takes over while the page loads: reload once so nobody runs stale files.
   const hadController=!!navigator.serviceWorker.controller;

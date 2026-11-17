@@ -153,7 +153,7 @@ nav.tabs button.on{color:#fff}
 .row.wrap{flex-wrap:wrap}
 .muted{color:var(--ink-2);font-size:14px}
 h2.sec{font-size:18px;margin:22px 4px 8px}
-input[type=text],input[type=number],textarea,select{
+input[type=text],input[type=password],input[type=number],textarea,select{
   width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:14px;font:inherit;font-size:16px;
   background:var(--field);color:var(--ink);box-shadow:inset 0 1px 3px rgba(20,40,60,.08)}
 textarea{min-height:150px;resize:vertical}
@@ -288,6 +288,7 @@ label.lbl{display:block;font-size:13px;color:var(--ink-2);margin:12px 0 4px 4px;
 .dialog h3{margin:0 0 6px;font-size:18px}
 .dialog .acts{display:flex;flex-direction:column;gap:8px;margin-top:16px}
 .about-list{font-size:13.5px;color:var(--ink-2);margin:8px 0 0;padding-left:18px}
+#sync-status.bad{color:var(--bad)}
 .about-list a{color:var(--accent)}
 
 /* ---------- fallbacks ---------- */
@@ -338,3 +339,23 @@ label.lbl{display:block;font-size:13px;color:var(--ink-2);margin:12px 0 4px 4px;
   .grade-bar,.save-area{bottom:16px}
   .toast{bottom:28px}
 }
+
+/* ---------- stroke order writer ---------- */
+.ico-zh{font-size:17px;font-weight:700;line-height:1}
+.audio-btn.small .ico-zh{font-size:14px}
+.writer-dlg{width:min(100%,360px);text-align:center}
+.writer-dlg h3{margin:0}
+.wr-chars{display:flex;justify-content:center;flex-wrap:wrap;gap:8px;margin:12px 0 2px}
+.wr-chars button{font-size:24px;min-width:48px;height:48px;border-radius:14px;cursor:pointer;
+  background:var(--glass-soft);border:1px solid var(--glass-stroke);font-weight:600}
+.wr-chars button[aria-selected="true"]{background:var(--accent-soft);border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.wr-py{font-size:18px;min-height:24px;margin:8px 0 6px}
+.wr-stage{position:relative;margin:0 auto;border-radius:18px;background:var(--field)}
+.wr-stage #wr-target,.wr-grid{position:absolute;inset:0;width:100%;height:100%}
+.wr-grid{fill:none;stroke:var(--line);stroke-width:.6;stroke-dasharray:2 2}
+.wr-grid rect{stroke-dasharray:none;stroke-width:.8}
+.wr-grid .diag{opacity:.7}
+.wr-stage #wr-target{touch-action:none}
+.wr-msg{min-height:20px;margin:10px 0 4px;font-size:14px;color:var(--ink-2)}
+.wr-acts{display:flex;justify-content:center;flex-wrap:wrap;gap:8px;margin-top:6px}
+.wr-acts .btn{width:auto;flex:1 1 auto;white-space:nowrap;padding:9px 12px}

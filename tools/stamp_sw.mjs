@@ -4,8 +4,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const FILES = ['index.html', 'assets/theme.css', 'vendor/chart.umd.min.js', 'vendor/pinyin-pro.min.js',
-  'data/dictionary.js', 'data/dictionary-extra.js', 'js/lookup.js', 'js/srs.js', 'js/app.js'];
+const FILES = ['index.html', 'assets/theme.css', 'vendor/chart.umd.min.js', 'vendor/pinyin-pro.min.js', 'vendor/hanzi-writer.min.js',
+  'data/dictionary.js', 'data/dictionary-extra.js', 'js/lookup.js', 'js/srs.js', 'js/sync.js', 'js/app.js'];
 const h = crypto.createHash('sha256');
 for (const f of FILES) h.update(fs.readFileSync(path.join(ROOT, f)));
 const id = 'hanziflow-v2-' + h.digest('hex').slice(0, 10);
