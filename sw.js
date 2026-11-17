@@ -1,8 +1,9 @@
 /* sw.js — offline cache. CACHE_ID is stamped by tools/stamp_sw.mjs; run `npm run stamp` before committing. */
-const CACHE_ID = "hanziflow-v2-e918885f14";
+const CACHE_ID = "hanziflow-v2-d7cbea6cd5";
 const SHELL = [
   "./", "index.html", "assets/theme.css", "vendor/chart.umd.min.js", "vendor/pinyin-pro.min.js", "vendor/hanzi-writer.min.js",
-  "data/dictionary.js", "js/lookup.js", "js/srs.js", "js/sync.js", "js/app.js"
+  "data/dictionary.js", "js/lookup.js", "js/srs.js", "js/sync.js", "js/app.js",
+  "manifest.webmanifest", "assets/icons/logo-96.png", "assets/icons/favicon-32.png", "assets/icons/apple-touch-icon.png"
 ];
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE_ID).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));

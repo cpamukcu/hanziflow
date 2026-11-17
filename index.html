@@ -7,6 +7,10 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>HanziFlow — Chinese Flashcards</title>
+<link rel="icon" type="image/png" sizes="32x32" href="assets/icons/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-title" content="HanziFlow">
 <script>window.HF_MISSING_DEPS=[];</script>
 <script defer src="vendor/chart.umd.min.js?v=2.0.0" onerror="window.HF_MISSING_DEPS.push('chart.js')"></script>
 <script defer src="vendor/pinyin-pro.min.js?v=2.0.0" onerror="window.HF_MISSING_DEPS.push('pinyin-pro')"></script>
@@ -26,7 +30,7 @@
 </nav>
 <div id="app">
   <header class="top glass glass-pill">
-    <div class="logo zh" aria-hidden="true">汉</div>
+    <img class="logo" src="assets/icons/logo-96.png" alt="" width="42" height="42">
     <div class="welcome">
       <h1>Hanzi<span class="flow">Flow</span></h1>
       <div class="muted" id="welcome-line">Welcome back</div>
