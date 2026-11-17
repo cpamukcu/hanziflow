@@ -109,7 +109,8 @@ body{
 /* ---------- shell ---------- */
 .shell{max-width:640px;margin:0 auto;padding:12px 16px calc(112px + env(safe-area-inset-bottom))}
 #app{min-width:0}
-header.top{display:flex;align-items:center;gap:10px;padding:8px 10px 8px 8px;margin-bottom:12px;background:var(--glass-strong)}
+header.top{display:flex;align-items:center;gap:12px;padding:10px 12px 10px 10px;margin-bottom:12px;background:var(--glass-strong)}
+header.top.glass-pill{border-radius:var(--radius)} /* same corners as the cards below */
 header.top>*{position:relative}
 .logo{width:42px;height:42px;border-radius:11px;flex:none;display:block;object-fit:cover;
   box-shadow:0 2px 8px rgba(28,52,78,.16), 0 0 0 1px rgba(40,70,95,.10)}
