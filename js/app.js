@@ -1030,7 +1030,7 @@ function scheduleSync(){
   syncTimer=setTimeout(()=>{if(syncBusyScreen())syncPending=true;else syncNow()},3000);
 }
 async function gh(path,opts={}){
-  const res=await fetch("https://api.github.com"+path,Object.assign({},opts,{headers:{
+  const res=await fetch("https://api.github.com"+path,Object.assign({},opts,{cache:"no-store",headers:{
     Authorization:"Bearer "+syncCfg.token,Accept:"application/vnd.github+json","Content-Type":"application/json"}}));
   if(!res.ok){
     const err=new Error(res.status===401?"GitHub rejected the token. Create a new one and connect again.":
@@ -1052,7 +1052,7 @@ async function readSyncGist(id){
   const gist=await gh("/gists/"+id);
   const f=gist.files&&gist.files[SYNC_FILE];
   if(!f)return null;
-  const text=f.truncated?await (await fetch(f.raw_url)).text():f.content;
+  const text=f.truncated?await (await fetch(f.raw_url,{cache:"no-store"})).text():f.content;
   return JSON.parse(text);
 }
 async function syncNow(manual){
@@ -1102,9 +1102,11 @@ function renderSyncCard(){
   if(syncCfg.token){
     box.innerHTML=`<div class="row between"><b>Sync between devices</b><span class="chip curated">On</span></div>
       <p class="muted" id="sync-status"></p>
-      <div class="row" style="gap:8px"><button class="btn small" id="sync-now">Sync now</button>
+      <div class="row wrap" style="gap:8px"><button class="btn small" id="sync-now">Sync now</button>
+      <button class="btn small coral" id="sync-pair">Connect another device</button>
       <button class="btn small ghost" id="sync-off">Turn off on this device</button></div>`;
     $("#sync-now").onclick=()=>syncNow(true);
+    $("#sync-pair").onclick=showPairDialog;
     $("#sync-off").onclick=async()=>{
       const yes=await hfDialog({title:"Turn off sync here?",body:"Your cards stay on this device and in the cloud copy. Other devices keep syncing.",
         actions:[{label:"Turn off",kind:"danger",value:true},{label:"Cancel",kind:"ghost",value:false}]});
@@ -1113,26 +1115,64 @@ function renderSyncCard(){
     renderSyncStatus();return;
   }
   box.innerHTML=`<b>Sync between devices</b>
-    <p class="muted">Keep your PC and iPhone in step. Your cards are saved to a private Gist on your own GitHub account; nobody else can see it.</p>
+    <p class="muted">Keep your computer and phone in step. Your cards are saved to a private Gist on your own GitHub account; nobody else can see it.</p>
     <ol class="about-list">
       <li><a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=HanziFlow%20sync" target="_blank" rel="noopener">Create a GitHub token</a> with only the “gist” box ticked, and copy it.</li>
-      <li>Paste it below on this device, then do the same on your other device.</li>
+      <li>Paste it below and tap Connect.</li>
+      <li>Then tap “Connect another device” to send your phone a one-tap link. On iPhone, open it in the HanziFlow you actually use: the home-screen app and Safari keep separate cards.</li>
     </ol>
-    <input type="password" id="sync-token" aria-label="GitHub token" placeholder="ghp_…" autocomplete="off" style="margin-top:10px">
+    <input type="password" id="sync-token" autocapitalize="off" spellcheck="false" aria-label="GitHub token" placeholder="Token (ghp_…) or pairing link" autocomplete="off" style="margin-top:10px">
     <div style="height:8px"></div>
     <button class="btn" id="sync-connect">Connect</button>`;
   $("#sync-connect").onclick=async()=>{
-    const token=$("#sync-token").value.trim();
+    let token=$("#sync-token").value.trim();
+    const at=token.indexOf(PAIR_PREFIX);if(at>=0)token=decodeURIComponent(token.slice(at+PAIR_PREFIX.length)).trim(); // a pasted pairing link works too
     if(!token)return toast("Paste your token first");
-    syncCfg={token,gistId:"",last:0,error:""};
     $("#sync-connect").textContent="Connecting…";
-    try{await gh("/gists?per_page=1")}
-    catch(e){syncCfg.token="";toast(e.status?e.message:"Couldn't reach GitHub");$("#sync-connect").textContent="Connect";return}
-    saveSyncCfg();renderSyncCard();await syncNow(true);
+    if(!await connectWithToken(token)&&$("#sync-connect"))$("#sync-connect").textContent="Connect";
   };
 }
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")syncNow()});
 window.addEventListener("online",()=>syncNow());
+window.addEventListener("focus",()=>syncNow());
+/* Both devices open at once (Mac on the desk, phone in hand): pick up the other's changes every 30 s. */
+setInterval(()=>{if(document.visibilityState==="visible")syncNow()},30000);
+
+/* Pairing link: the token travels in the #hash, which browsers never send to a server. */
+const PAIR_PREFIX="#hfsync=";
+function pairLink(){return location.origin+location.pathname+PAIR_PREFIX+encodeURIComponent(syncCfg.token)}
+async function connectWithToken(token){
+  const prevCfg=syncCfg;
+  syncCfg={token,gistId:"",last:0,error:""};
+  try{await gh("/gists?per_page=1")}
+  catch(e){syncCfg=prevCfg;toast(e.status?e.message:"Couldn't reach GitHub");return false}
+  saveSyncCfg();renderSyncCard();await syncNow(true);
+  return true;
+}
+async function showPairDialog(){
+  const link=pairLink();
+  const canShare=!!navigator.share;
+  const v=await hfDialog({title:"Connect your phone",
+    body:"Send this link to your phone (AirDrop, Messages, or copy here and paste on iPhone). Open it in the HanziFlow you use there and tap Connect. The link holds your sync key, so only send it to yourself.",
+    actions:[...(canShare?[{label:"Share link…",value:"share"}]:[]),{label:"Copy link",kind:canShare?"ghost":"",value:"copy"},{label:"Close",kind:"ghost",value:null}]});
+  if(v==="share"){try{await navigator.share({title:"HanziFlow sync",url:link})}catch(e){}}
+  if(v==="copy"){
+    try{await navigator.clipboard.writeText(link);toast("Link copied — paste it on your phone")}
+    catch(e){await hfDialog({title:"Copy this link",input:link,actions:[{label:"Done",value:true}]})}
+  }
+}
+async function checkPairLink(){
+  if(!location.hash.startsWith(PAIR_PREFIX))return;
+  const token=decodeURIComponent(location.hash.slice(PAIR_PREFIX.length)).trim();
+  history.replaceState(null,"",location.pathname+location.search); // keep the key out of the address bar
+  if(!token)return;
+  if(token===syncCfg.token){toast("This device is already syncing");return}
+  const yes=await hfDialog({title:"Connect this device?",
+    body:"Your decks and cards will sync with your other devices through your private GitHub Gist. Cards already on this device are kept and merged.",
+    actions:[{label:"Connect",value:true},{label:"Not now",kind:"ghost",value:false}]});
+  if(yes&&await connectWithToken(token))toast("Connected — syncing with your other devices");
+}
+window.addEventListener("hashchange",checkPairLink);
 
 /* ============ init ============ */
 load();
@@ -1142,6 +1182,7 @@ go("home");
 if(loadProblem){$("#scr-home").insertAdjacentHTML("afterbegin",`<div class="notice">${esc(loadProblem)}</div>`)}
 repairBlankCards();
 syncNow();
+checkPairLink();
 if("serviceWorker" in navigator&&(location.protocol==="https:"||location.hostname==="localhost"||location.hostname==="127.0.0.1")){
   // A new version takes over while the page loads: reload once so nobody runs stale files.
   const hadController=!!navigator.serviceWorker.controller;
