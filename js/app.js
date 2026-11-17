@@ -141,6 +141,7 @@ const ICON={
   trash:svg('<path d="M4.500 7h15M9.500 7V4.500h5V7M6.500 7l1 13h9l1-13"/>'),
   redo:svg('<path d="M19 5v5h-5"/><path d="M19 10a7.500 7.500 0 1 0 .8 5"/>'),
   sun:svg('<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.600 5.600 7 7M17 17l1.400 1.400M5.600 18.400 7 17M17 7l1.400-1.400"/>'),
+  write:'<span class="ico-zh zh" aria-hidden="true">写</span>',
   moon:svg('<path d="M20 14.500A8.500 8.500 0 0 1 9.500 4a8.500 8.500 0 1 0 10.500 10.500Z"/>')
 };
 let _pinyinWarned=false;
@@ -327,6 +328,7 @@ function cardRowHTML(c){
     <div class="hw zh">${colorHanzi(c.w,c.p)}</div>
     <div class="det"><div class="p">${colorPinyin(c.p)}</div><div class="m">${esc(c.m)||'<i>no meaning yet</i>'}</div></div>
     <span class="stage ${st}">${st}</span>
+    <button class="audio-btn small" data-write="${esc(c.w)}" data-write-py="${esc(c.p)}" aria-label="Stroke order for ${esc(c.w)}" title="Stroke order">${ICON.write}</button>
     <button class="audio-btn small" data-say="${esc(c.w)}" aria-label="Listen to ${esc(c.w)}">${ICON.say}</button>
   </div>`;
 }
@@ -646,6 +648,108 @@ function cardForm(c,deckId){
 }
 $("#btn-add-card").onclick=()=>{cardForm(null,latestDeck().id)};
 
+/* ============ stroke order (Hanzi Writer) ============ */
+/* Stroke data comes from the hanzi-writer-data package on jsDelivr; sw.js keeps a copy of each character after first use. */
+const STROKE_URL="https://cdn.jsdelivr.net/npm/hanzi-writer-data@2.0.1/";
+const strokeCache={};
+function loadStrokes(ch){
+  if(!strokeCache[ch])strokeCache[ch]=fetch(STROKE_URL+encodeURIComponent(ch)+".json")
+    .then(r=>{if(!r.ok)throw new Error(r.status===404?"missing":"HTTP "+r.status);return r.json()})
+    .catch(e=>{delete strokeCache[ch];throw e});
+  return strokeCache[ch];
+}
+const GRID_SVG=`<svg class="wr-grid" viewBox="0 0 100 100" aria-hidden="true"><rect x="1" y="1" width="98" height="98" rx="6"/>
+  <path d="M50 1V99M1 50H99"/><path class="diag" d="M1 1 99 99M99 1 1 99"/></svg>`;
+function openWriter(word,pinyin){
+  if(typeof window.HanziWriter==="undefined")return toast("Stroke animations are unavailable — vendor/hanzi-writer.min.js did not load");
+  const chars=[...String(word||"")].filter(ch=>HANZI_RE.test(ch));
+  if(!chars.length)return toast("No Chinese characters to write");
+  const tones=tonesFor(chars.join(""),pinyin);
+  const syls=splitSyllables(pinyin);
+  const charPinyin=i=>syls.length===chars.length?syls[i]:hfPinyin(chars[i]);
+  const root=$("#dialog-root"),prev=document.activeElement;
+  const size=Math.max(180,Math.min(280,window.innerWidth-96));
+  root.innerHTML=`<div class="overlay"><div class="dialog writer-dlg" role="dialog" aria-modal="true" aria-labelledby="wr-t">
+    <div class="row between"><h3 id="wr-t">Stroke order</h3>
+      <button class="icon-btn" id="wr-x" aria-label="Close">✕</button></div>
+    ${chars.length>1?`<div class="wr-chars" role="tablist" aria-label="Characters">${chars.map((ch,i)=>
+      `<button role="tab" class="zh t${tones[i]||0}" data-ci="${i}" aria-label="${esc(ch)}">${esc(ch)}</button>`).join("")}</div>`:""}
+    <div class="wr-py" id="wr-py"></div>
+    <div class="wr-stage" style="width:${size}px;height:${size}px">${GRID_SVG}<div id="wr-target"></div></div>
+    <div class="wr-msg" id="wr-msg" aria-live="polite"></div>
+    <div class="wr-acts">
+      <button class="btn small ghost" id="wr-play">▶ Watch</button>
+      <button class="btn small" id="wr-quiz">✍ Practice</button>
+      ${chars.length>1?'<button class="btn small ghost" id="wr-all">Whole word</button>':""}
+    </div>
+  </div></div>`;
+  let cur=0,writer=null,run=0,mode="watch";
+  const msg=t=>{const m=$("#wr-msg");if(m)m.textContent=t};
+  const color=v=>cssVar(v)||"#14212c";
+  function mount(i){
+    run++;cur=i;
+    if(writer){try{writer.cancelQuiz()}catch(e){}}
+    root.querySelectorAll("[data-ci]").forEach(b=>b.setAttribute("aria-selected",+b.dataset.ci===i?"true":"false"));
+    $("#wr-py").innerHTML=colorPinyin(charPinyin(i)||"");
+    const tgt=$("#wr-target");tgt.innerHTML="";
+    msg("Loading strokes…");
+    writer=HanziWriter.create(tgt,chars[i],{
+      width:size,height:size,padding:Math.round(size*.06),
+      showCharacter:false,showOutline:true,
+      strokeColor:color("--t"+(tones[i]||0)),outlineColor:color("--line"),
+      radicalColor:null,highlightColor:color("--accent-2"),drawingColor:color("--accent"),
+      strokeAnimationSpeed:1,delayBetweenStrokes:260,showHintAfterMisses:2,drawingWidth:Math.max(12,Math.round(size/18)),
+      charDataLoader:(ch,ok,fail)=>{loadStrokes(ch).then(ok,fail)},
+      onLoadCharDataSuccess:d=>{const n=d.strokes.length,label=`${n} stroke${n===1?"":"s"}`;
+        msg(mode==="quiz"?`Trace the ${label} in order. A hint appears after 2 misses.`:label)},
+      onLoadCharDataError:e=>msg(e&&e.message==="missing"?`No stroke data for ${chars[i]}.`:"Stroke data needs an internet connection the first time.")
+    });
+    return writer;
+  }
+  async function watch(i){
+    mode="watch";const my=mount(i),token=run;
+    try{await my.animateCharacter()}catch(e){}
+    return token===run;
+  }
+  async function watchAll(from){
+    for(let i=from;i<chars.length;i++){
+      if(!await watch(i))return;
+      const token=run;
+      if(i<chars.length-1)await new Promise(r=>setTimeout(r,450));
+      if(token!==run)return;
+    }
+  }
+  function practice(i){
+    mode="quiz";const my=mount(i),token=run;
+    my.quiz({
+      onMistake:s=>{if(token===run)msg(`Not quite — stroke ${s.strokeNum+1}. Try again.`)},
+      onCorrectStroke:s=>{if(token===run)msg(s.strokesRemaining?`Good! ${s.strokesRemaining} to go.`:"")},
+      onComplete:s=>{
+        if(token!==run)return;
+        const m=s.totalMistakes;
+        msg(m===0?"Perfect! 完美 🎉":`Done with ${m} mistake${m===1?"":"s"}.`);
+        if(i<chars.length-1)setTimeout(()=>{if(token===run&&mode==="quiz")practice(i+1)},1100);
+      }
+    });
+  }
+  const close=()=>{run++;if(writer){try{writer.cancelQuiz()}catch(e){}}root.innerHTML="";document.removeEventListener("keydown",onKey);if(prev&&prev.focus)prev.focus()};
+  const onKey=e=>{if(e.key==="Escape")close()};
+  document.addEventListener("keydown",onKey);
+  root.querySelector(".overlay").onclick=e=>{if(e.target.classList.contains("overlay"))close()};
+  $("#wr-x").onclick=close;
+  $("#wr-play").onclick=()=>watch(cur);
+  $("#wr-quiz").onclick=()=>practice(cur);
+  const all=$("#wr-all");if(all)all.onclick=()=>watchAll(0);
+  root.querySelectorAll("[data-ci]").forEach(b=>b.onclick=()=>mode==="quiz"?practice(+b.dataset.ci):watch(+b.dataset.ci));
+  $("#wr-play").focus();
+  watchAll(0);
+}
+/* Any [data-write] button opens the writer; capture phase so the card underneath doesn't flip or open. */
+document.addEventListener("click",e=>{
+  const b=e.target.closest("[data-write]");if(!b)return;
+  e.stopPropagation();openWriter(b.dataset.write,b.dataset.writePy||"");
+},true);
+
 /* ============ study ============ */
 let session=null;
 function startStudy(deckId){
@@ -670,7 +774,10 @@ function renderStudyCard(){
     <div class="study-wrap"><div class="flip" id="flip" role="button" tabindex="0" aria-label="Flip card">
       <div class="face front">
         <div class="big-hanzi zh">${colorHanzi(c.w,c.p)}</div>
-        <button class="audio-btn" data-say="${esc(c.w)}" aria-label="Listen">${ICON.say}</button>
+        <div class="row" style="justify-content:center;gap:10px">
+          <button class="audio-btn" data-say="${esc(c.w)}" aria-label="Listen">${ICON.say}</button>
+          <button class="audio-btn" data-write="${esc(c.w)}" data-write-py="${esc(c.p)}" aria-label="Show stroke order" title="Stroke order">${ICON.write}</button>
+        </div>
         <div class="flip-hint">Tap the card to reveal</div>
       </div>
       <div class="face back">
