@@ -6,7 +6,7 @@ const newSRS=window.HFSRS.newSRS;
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,8)}
 
 const defaultState=()=>({
-  version:SCHEMA,decks:[],cards:[],
+  version:SCHEMA,decks:[],cards:[],lessons:[],
   settings:{target:20,newCap:15,theme:"light"},
   streak:{count:0,last:null},
   reviews:{}
@@ -18,6 +18,7 @@ function normalizeState(p){
   return Object.assign(d,p,{version:SCHEMA,
     decks:Array.isArray(p.decks)?p.decks:[],
     cards:Array.isArray(p.cards)?p.cards:[],
+    lessons:Array.isArray(p.lessons)?p.lessons:[],
     settings:Object.assign(d.settings,p.settings||{}),
     streak:Object.assign(d.streak,p.streak||{}),
     reviews:p.reviews||{}});
@@ -192,7 +193,7 @@ function studyQueue(deckId){
 }
 
 /* ============ router ============ */
-const SCREENS=["home","weeks","week-detail","add","study","quiz","browse","stats","settings"];
+const SCREENS=["home","weeks","week-detail","lessons","add","study","quiz","browse","stats","settings"];
 let curScreen="home";
 function placeBubble(){
   const on=$("nav.tabs button.on"),b=$(".bubble");
@@ -216,6 +217,7 @@ function go(name){
   if(name==="browse"){browseLimit=BROWSE_PAGE;renderBrowse()}
   if(name==="stats")renderStats();
   if(name==="settings")renderSettings();
+  if(name==="lessons"&&window.renderLessons)window.renderLessons();
   window.scrollTo(0,0);
   if(syncPending&&!syncBusyScreen())syncNow();
 }
@@ -280,6 +282,7 @@ function renderWeeks(){
   list.innerHTML=S.decks.map(weekItemHTML).join("")||`<div class="empty"><div class="big zh">卡</div>No decks yet.<br>Tap “+ New Week” to start.</div>`;
   bindWeekItems(list);
 }
+$("#btn-hsk-deck").onclick=()=>{if(window.openHskPicker)window.openHskPicker()};
 $("#btn-new-week").onclick=()=>{
   const d={id:uid(),name:"Week "+(S.decks.length+1),created:todayStr()};
   S.decks.push(d);save();startPaste(d.id);
@@ -924,6 +927,7 @@ function renderStats(){
 /* ============ settings ============ */
 function renderSettings(){
   renderSyncCard();
+  if(window.renderAiCard)window.renderAiCard($("#ai-card"));
   $("#set-target").value=S.settings.target;
   $("#set-newcap").value=S.settings.newCap;
   $("#set-dark").checked=S.settings.theme==="dark";
@@ -953,6 +957,8 @@ function mergeBackup(data){
   incoming.decks.forEach(d=>{
     if(!S.decks.some(x=>x.id===d.id))S.decks.push(d);
   });
+  S.lessons=S.lessons||[];
+  incoming.lessons.forEach(l=>{if(l&&l.id&&!S.lessons.some(x=>x.id===l.id))S.lessons.push(l)});
   const seen=new Set(S.cards.map(c=>c.deckId+"|"+norm(c.w)));
   let added=0;
   incoming.cards.forEach(c=>{
@@ -1023,7 +1029,7 @@ let syncCfg={token:"",gistId:"",last:0,error:""};
 try{syncCfg=Object.assign(syncCfg,JSON.parse(localStorage.getItem(SYNC_KEY)||"{}"))}catch(e){console.warn("[HanziFlow] sync settings unreadable",e)}
 function saveSyncCfg(){localStorage.setItem(SYNC_KEY,JSON.stringify(syncCfg))}
 let syncTimer=null,syncRunning=false,syncPending=false;
-const syncBusyScreen=()=>["study","quiz","add"].includes(curScreen); // never swap data under an open card
+const syncBusyScreen=()=>["study","quiz","add"].includes(curScreen)||(curScreen==="lessons"&&!!(window.lessonsBusy&&window.lessonsBusy())); // never swap data under an open card
 function scheduleSync(){
   if(!syncCfg.token)return;
   clearTimeout(syncTimer);
