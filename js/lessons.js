@@ -26,7 +26,8 @@
   const aiReady = (s) => !!(s.apiKey && s.model && /^https?:\/\//.test(s.baseUrl));
   function getProg(id) {
     const p = readJSON(PROG_KEY, {})[id] || {};
-    return { step: Number.isInteger(p.step) && p.step >= 0 ? p.step : 0, missed: Array.isArray(p.missed) ? p.missed : [] };
+    return { step: Number.isInteger(p.step) && p.step >= 0 ? p.step : 0, key: typeof p.key === "string" ? p.key : null,
+      missed: Array.isArray(p.missed) ? p.missed : [] };
   }
   function setProg(id, p) { const all = readJSON(PROG_KEY, {}); all[id] = p; writeJSON(PROG_KEY, all); }
   function clearProg(id) { const all = readJSON(PROG_KEY, {}); delete all[id]; writeJSON(PROG_KEY, all); }
@@ -72,7 +73,8 @@
     const mine = (S.lessons || []).slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     const progLabel = (l) => {
       const steps = L.buildSteps(l), p = getProg(l.id);
-      return p.step >= steps.length - 1 && p.step > 0 ? "Check-up" : `Step ${Math.min(p.step + 1, steps.length)} of ${steps.length}`;
+      const i = p.key && steps.includes(p.key) ? steps.indexOf(p.key) : Math.min(p.step, steps.length - 1);
+      return i === 0 && !p.key ? "Not started" : `${STEP_NAMES[steps[i]]} (${i + 1}/${steps.length})`;
     };
     const groups = {};
     HF_HSK.grammar.forEach((g, i) => (groups[g.lv] = groups[g.lv] || []).push(i));
@@ -112,6 +114,7 @@
     flow().querySelectorAll("[data-del]").forEach((b) => b.onclick = async (e) => {
       e.stopPropagation();
       const l = findLesson(b.dataset.del);
+      if (!l) return renderLessons(); // already removed (e.g. by a sync)
       const ok = await hfDialog({ title: "Delete lesson?", body: `“${l.title}” will be removed from all your devices. Its flashcard deck stays.`,
         actions: [{ label: "Delete", kind: "danger", value: true }, { label: "Cancel", kind: "ghost", value: null }] });
       if (!ok) return;
@@ -154,7 +157,7 @@
     let src;
     try { src = await createImageBitmap(file); }
     catch (e) {
-      src = await new Promise((res, rej) => { const img = new Image(); img.onload = () => res(img); img.onerror = () => rej(new Error("bad image")); img.src = URL.createObjectURL(file); });
+      src = await new Promise((res, rej) => { const img = new Image(); const u = URL.createObjectURL(file); img.onload = () => { URL.revokeObjectURL(u); res(img); }; img.onerror = () => { URL.revokeObjectURL(u); rej(new Error("bad image")); }; img.src = u; });
     }
     const scale = Math.min(1, MAX_SIDE / Math.max(src.width, src.height));
     const c = document.createElement("canvas");
@@ -213,8 +216,14 @@
           <label class="switch"><input type="checkbox" id="rv-cards" ${addCards ? "checked" : ""} aria-label="Add words to flashcards"><span class="sl"></span></label></div>
         <p class="muted" style="margin:4px 0 0">Creates a deck “${esc(lesson.title)}” so these words come back in Study Now.</p>
         <button class="btn coral" id="rv-start" style="margin-top:14px">Start studying →</button>
+        <button class="btn ghost" id="rv-discard" style="margin-top:8px">Discard</button>
       </div>`;
     flow().querySelectorAll("[data-rmw]").forEach((b) => b.onclick = () => { words.splice(+b.dataset.rmw, 1); renderReview(lesson, $("#rv-cards").checked); });
+    $("#rv-discard").onclick = async () => {
+      const ok = await hfDialog({ title: "Discard this lesson?", body: "You'd need to read the photos again (one more AI request) to get it back.",
+        actions: [{ label: "Discard", kind: "danger", value: true }, { label: "Keep it", kind: "ghost", value: null }] });
+      if (ok) renderLessons();
+    };
     $("#rv-start").onclick = async () => {
       const wantCards = $("#rv-cards").checked;
       $("#rv-start").disabled = true;
@@ -263,11 +272,13 @@
     const steps = L.buildSteps(lesson);
     if (!steps.length) { toast("This lesson has nothing to practise yet"); return renderLessons(); }
     const p = getProg(id);
-    run = { lesson, steps, idx: Math.min(p.step, steps.length - 1), missed: new Set(p.missed) };
+    // Resume by step name: a built-in lesson's steps can differ once the full dictionary has loaded.
+    const byKey = p.key ? steps.indexOf(p.key) : -1;
+    run = { lesson, steps, idx: byKey >= 0 ? byKey : Math.min(p.step, steps.length - 1), missed: new Set(p.missed) };
     if (curScreen !== "lessons") go("lessons");
     renderStep();
   }
-  function saveRun() { setProg(run.lesson.id, { step: run.idx, missed: [...run.missed] }); }
+  function saveRun() { setProg(run.lesson.id, { step: run.idx, key: run.steps[run.idx], missed: [...run.missed] }); }
   function move(d) {
     const n = run.idx + d;
     if (n < 0 || n >= run.steps.length) { run = null; return renderLessons(); }
@@ -336,7 +347,7 @@
       el.querySelector(".ls-fb").innerHTML = `<span class="zh">${colorHanzi(d.answer.hanzi, d.answer.pinyin)}</span> ${colorPinyin(d.answer.pinyin)} — ${esc(d.answer.meaning)}`;
       continueBtn(el, done, ok);
     });
-    setTimeout(() => speak(d.answer.hanzi), 250);
+    setTimeout(() => { if (el.isConnected && !el.querySelector(".ls-fb").textContent) speak(d.answer.hanzi); }, 250);
   }
   function blankWidget(el, d, done) {
     const full = d.prompt.replace("＿＿", d.answer);
@@ -504,11 +515,14 @@
   }
 
   /* ---------- HSK decks ---------- */
+  // Decks made before the naming change were called "HSK 2.0 · HSK 1".
+  const findHskDeck = (std, lv) => S.decks.find((d) => d.name === L.hskDeckName(std, lv) || d.name === std + " · " + lv);
   async function openHskPicker() {
     let std = "HSK 2.0";
     const existing = () => new Set(S.cards.map((c) => c.w));
     const root = $("#dialog-root"), prev = document.activeElement;
-    const close = () => { root.innerHTML = ""; document.removeEventListener("keydown", onKey); if (prev && prev.focus) prev.focus(); };
+    let closed = false;
+    const close = () => { closed = true; root.innerHTML = ""; document.removeEventListener("keydown", onKey); if (prev && prev.focus) prev.focus(); };
     const onKey = (e) => { if (e.key === "Escape") close(); };
     document.addEventListener("keydown", onKey);
     const draw = () => {
@@ -517,9 +531,9 @@
       root.innerHTML = `<div class="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="hsk-t">
         <h3 id="hsk-t">Add an HSK deck</h3>
         <div class="seg">${Object.keys(HF_HSK.lists).map((s) => `<button data-std="${esc(s)}" class="${s === std ? "on" : ""}">${esc(s)}</button>`).join("")}</div>
-        ${levels.map(([lv, list]) => { const plan = L.hskDeckPlan(list, have); const exists = S.decks.some((d) => d.name === std + " · " + lv); return `
+        ${levels.map(([lv, list]) => { const plan = L.hskDeckPlan(list, have); const exists = !!findHskDeck(std, lv); return `
           <button class="quiz-opt ls-hsk" data-lv="${esc(lv)}" ${plan.add.length ? "" : "disabled"}>
-            <b>${esc(lv)}</b> <span class="muted">· ${list.length} words${plan.skipped ? ` · ${plan.skipped} already in HanziFlow` : ""}${exists ? " · deck exists" : ""}</span>
+            <b>${esc(lv)}</b> <span class="muted">· ${list.length - plan.repeats} words${plan.known ? ` · ${plan.known} already in HanziFlow` : ""}${exists ? " · deck exists" : ""}</span>
           </button>`; }).join("")}
         <p class="muted" style="margin-top:8px">New cards arrive ${esc(S.settings.newCap)} per session (change it in Settings), so a big list won't flood your reviews.</p>
         <div class="acts"><button class="btn ghost" id="hsk-x">Close</button></div></div></div>`;
@@ -528,16 +542,18 @@
       root.querySelectorAll("[data-std]").forEach((b) => b.onclick = () => { std = b.dataset.std; draw(); });
       root.querySelectorAll("[data-lv]").forEach((b) => b.onclick = async () => {
         const lv = b.dataset.lv;
-        b.disabled = true;
+        root.querySelectorAll("[data-lv],[data-std]").forEach((x) => (x.disabled = true));
+        b.querySelector(".muted").textContent = " · preparing cards…";
         try { if (HF.ensureExtra) await HF.ensureExtra(); } catch (e) { console.warn("[HanziFlow] full dictionary unavailable", e); }
+        if (closed) return; // closed while the dictionary was loading: add nothing
         const plan = L.hskDeckPlan(HF_HSK.lists[std][lv], existing());
-        const name = std + " · " + lv;
-        let deck = S.decks.find((d) => d.name === name);
+        let deck = findHskDeck(std, lv);
+        const name = deck ? deck.name : L.hskDeckName(std, lv);
         if (!deck) { deck = { id: uid(), name, created: todayStr() }; S.decks.push(deck); }
         plan.add.forEach((x) => S.cards.push(cardFor(deck.id, x.w, { fallbackP: x.p, fallbackM: x.m.replace(/…$/, ""), source: "hsk" })));
         save();
         close();
-        toast(`Added ${plan.add.length} card${plan.add.length === 1 ? "" : "s"} to “${name}”${plan.skipped ? ` · ${plan.skipped} you already had` : ""}`);
+        toast(`Added ${plan.add.length} card${plan.add.length === 1 ? "" : "s"} to “${name}”${plan.known ? ` · ${plan.known} you already had` : ""}`);
         if (typeof renderWeeks === "function" && curScreen === "weeks") renderWeeks();
       });
     };

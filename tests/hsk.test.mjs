@@ -32,3 +32,12 @@ test('hskDeckPlan skips words already in HanziFlow and duplicates', () => {
   assert.deepEqual(plan.add[0], { w: '爱', p: 'ài', m: 'love' });
   assert.equal(plan.skipped, 2);
 });
+test('hskDeckPlan counts known words and in-list repeats separately', () => {
+  const plan = C.hskDeckPlan([['爱', 'ài', 'love'], ['爱', 'ài', 'dup'], ['八', 'bā', 'eight']], new Set(['八']));
+  assert.equal(plan.known, 1);
+  assert.equal(plan.repeats, 1);
+});
+test('hskDeckName puts the level first so the deck badge shows its number', () => {
+  assert.equal(C.hskDeckName('HSK 2.0', 'HSK 1'), 'HSK 1 · 2.0');
+  assert.equal(C.hskDeckName('HSK 3.0', 'Band 4'), 'Band 4 · HSK 3.0');
+});

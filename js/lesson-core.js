@@ -74,14 +74,9 @@
     };
   }
 
-  // Models often wrap JSON in prose or ``` fences; take the first balanced {...}.
-  function extractJson(text) {
-    const s = String(text || "").replace(/```(?:json)?/gi, "");
-    const start = s.indexOf("{");
-    if (start < 0) return null;
-    let depth = 0;
-    let inStr = false;
-    let esc = false;
+  // Models often wrap JSON in prose or ``` fences; take the first balanced {...} that parses.
+  function balancedAt(s, start) {
+    let depth = 0, inStr = false, esc = false;
     for (let i = start; i < s.length; i++) {
       const ch = s[i];
       if (inStr) {
@@ -90,13 +85,19 @@
         else if (ch === '"') inStr = false;
       } else if (ch === '"') inStr = true;
       else if (ch === "{") depth++;
-      else if (ch === "}" && --depth === 0) {
-        try {
-          return JSON.parse(s.slice(start, i + 1));
-        } catch {
-          return null;
-        }
-      }
+      else if (ch === "}" && --depth === 0) return s.slice(start, i + 1);
+    }
+    return null;
+  }
+  function extractJson(text) {
+    const s = String(text || "").replace(/```(?:json)?/gi, "");
+    for (let start = s.indexOf("{"); start >= 0; start = s.indexOf("{", start + 1)) {
+      const chunk = balancedAt(s, start);
+      if (!chunk) continue;
+      try {
+        const v = JSON.parse(chunk);
+        if (isObj(v)) return v;
+      } catch (e) { /* try the next "{" */ }
     }
     return null;
   }
@@ -164,7 +165,8 @@
     for (const g of lesson.grammar) {
       const pointRuns = (g.point.match(/[㐀-鿿豈-﫿]+/g) || []);
       for (const ex of g.examples) {
-        const target = pointRuns.find((r) => ex.hanzi.includes(r)) || wordList.find((w) => ex.hanzi.includes(w));
+        const once = (t) => ex.hanzi.split(t).length === 2; // blanking a repeated word would leave it visible
+        const target = pointRuns.find(once) || wordList.find(once);
         if (!target) continue;
         const others = [...new Set([...allTargets, ...wordList])].filter((t) => t !== target && !ex.hanzi.includes(t));
         items.push({
@@ -289,6 +291,9 @@
     const b = String(body || "");
     if (status == null) return "Couldn't reach the AI service. Check your internet connection (or VPN) and try again.";
     if (status === 401 || status === 403) return "The AI service rejected your API key. Check it in Settings.";
+    if (status === 413) return "The photos are too big for this service. Try fewer pages at a time.";
+    if (status >= 400 && status < 500 && /(not a valid model|model.*(not found|does not exist|invalid))/i.test(b))
+      return "The AI service doesn't know this model name. Check the model in Settings.";
     if (status >= 400 && status < 500 && /image|vision|modalit|multimodal/i.test(b))
       return "This model can't read photos. In Settings, pick a model that accepts images.";
     if (status === 402 || /insufficient|balance|quota|arrear|credit/i.test(b))
@@ -333,21 +338,27 @@
 
   // Which words of an HSK list still need adding: skips words already in HanziFlow and repeats.
   function hskDeckPlan(list, existing) {
-    const seen = new Set(existing);
+    const have = new Set(existing), seen = new Set();
     const add = [];
-    let skipped = 0;
+    let known = 0, repeats = 0;
     for (const [w, p, m] of list) {
-      if (seen.has(w)) { skipped++; continue; }
+      if (seen.has(w)) { repeats++; continue; }
       seen.add(w);
+      if (have.has(w)) { known++; continue; }
       add.push({ w, p, m });
     }
-    return { add, skipped };
+    return { add, skipped: known + repeats, known, repeats };
+  }
+
+  // "HSK 1 · 2.0", "Band 4 · HSK 3.0": level first, so the deck badge shows the level's number.
+  function hskDeckName(std, level) {
+    return /^HSK/.test(level) ? level + " · " + std.replace(/^HSK\s*/, "") : level + " · " + std;
   }
 
   const api = {
     EXTRACTION_PROMPT, validateLesson, parseModelReply,
     segment, makeListenPick, makeGrammarBlanks, makeBuild, makeCheckup, buildSteps,
-    PRESETS, buildExtractionRequest, errorMessage, readReply, builtinLesson, hskDeckPlan,
+    PRESETS, buildExtractionRequest, errorMessage, readReply, builtinLesson, hskDeckPlan, hskDeckName,
   };
 
   g.HFLesson = api;
