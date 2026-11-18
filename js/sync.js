@@ -1,5 +1,5 @@
 /* js/sync.js — device sync: change tracking and merging (pure; also loaded by Node tests).
- * Every deck/card carries u = last-modified ms. Deletions leave tombstones in state.deleted.
+ * Every deck/card/lesson carries u = last-modified ms. Deletions leave tombstones in state.deleted.
  * Merge rule: newest version of each record wins; a tombstone newer than the record removes it.
  */
 (function (g) {
@@ -8,7 +8,7 @@
   function body(r) { var c = Object.assign({}, r); delete c.u; return JSON.stringify(c); }
   function settingsBody(s) { var c = Object.assign({}, s); delete c.theme; return JSON.stringify(c); } // theme stays per device
   function each(S, fn) {
-    ["decks", "cards"].forEach(function (kind) {
+    ["decks", "cards", "lessons"].forEach(function (kind) {
       (S[kind] || []).forEach(function (r) { fn(kind[0] + ":" + r.id, r); });
     });
   }
@@ -45,7 +45,7 @@
     });
     var cutoff = now - TOMBSTONE_DAYS * 86400000;
     Object.keys(del).forEach(function (k) { if (del[k] < cutoff) delete del[k]; });
-    ["decks", "cards"].forEach(function (kind) {
+    ["decks", "cards", "lessons"].forEach(function (kind) {
       var byId = new Map();
       (local[kind] || []).concat(remote[kind] || []).forEach(function (r) {
         var cur = byId.get(r.id);

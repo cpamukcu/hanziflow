@@ -6,7 +6,7 @@ const newSRS=window.HFSRS.newSRS;
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,8)}
 
 const defaultState=()=>({
-  version:SCHEMA,decks:[],cards:[],
+  version:SCHEMA,decks:[],cards:[],lessons:[],
   settings:{target:20,newCap:15,theme:"light"},
   streak:{count:0,last:null},
   reviews:{}
@@ -18,6 +18,7 @@ function normalizeState(p){
   return Object.assign(d,p,{version:SCHEMA,
     decks:Array.isArray(p.decks)?p.decks:[],
     cards:Array.isArray(p.cards)?p.cards:[],
+    lessons:Array.isArray(p.lessons)?p.lessons:[],
     settings:Object.assign(d.settings,p.settings||{}),
     streak:Object.assign(d.streak,p.streak||{}),
     reviews:p.reviews||{}});
@@ -953,6 +954,8 @@ function mergeBackup(data){
   incoming.decks.forEach(d=>{
     if(!S.decks.some(x=>x.id===d.id))S.decks.push(d);
   });
+  S.lessons=S.lessons||[];
+  incoming.lessons.forEach(l=>{if(l&&l.id&&!S.lessons.some(x=>x.id===l.id))S.lessons.push(l)});
   const seen=new Set(S.cards.map(c=>c.deckId+"|"+norm(c.w)));
   let added=0;
   incoming.cards.forEach(c=>{

@@ -80,4 +80,22 @@ t('cards of a deleted deck disappear', () => {
   pc.edit(S => { S.decks = []; S.cards = []; }, 1000);
   assert.equal(Y.merge(phone.S, clone(pc.S), 2000).cards.length, 0);
 });
+t('new lesson on PC reaches the phone', () => {
+  const pc = device(state()), phone = device(state());
+  pc.edit(S => { S.lessons = [{ id: 'l1', title: '第十五课', words: [] }]; }, 1000);
+  const m = Y.merge(phone.S, clone(pc.S), 2000);
+  assert.deepEqual(m.lessons.map(l => l.title), ['第十五课']);
+});
+t('deleted lesson stays deleted', () => {
+  const base = state(); base.lessons = [{ id: 'l1', title: 'x', words: [], u: 1 }];
+  const pc = device(clone(base)), phone = device(clone(base));
+  pc.edit(S => { S.lessons = []; }, 1000);
+  assert.equal(Y.merge(phone.S, clone(pc.S), 2000).lessons.length, 0);
+  assert.equal(Y.merge(clone(pc.S), clone(phone.S), 2000).lessons.length, 0);
+});
+t('state without lessons merges fine', () => {
+  const a = state(), b = state(); b.lessons = [{ id: 'l1', title: 'x', words: [], u: 5 }];
+  assert.deepEqual(Y.merge(a, clone(b), 10).lessons.map(l => l.id), ['l1']);
+  assert.deepEqual(Y.merge(state(), state(), 10).lessons, []);
+});
 console.log(`\n${n} passed, 0 failed`);
