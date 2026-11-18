@@ -17,6 +17,7 @@
     Object.keys(hashes).forEach(function (k) { delete hashes[k]; });
     each(S, function (k, r) { hashes[k] = body(r); });
     hashes.settings = settingsBody(S.settings || {});
+    hashes.ai = JSON.stringify(S.ai || null);
   }
   /* Called on every save: stamp what changed since last time, tombstone what disappeared. */
   function stamp(S, hashes, now) {
@@ -29,11 +30,13 @@
       if (hashes[k] !== b) { r.u = now; hashes[k] = b; delete S.deleted[k]; }
     });
     Object.keys(hashes).forEach(function (k) {
-      if (k === "settings" || seen[k]) return;
+      if (k === "settings" || k === "ai" || seen[k]) return;
       S.deleted[k] = now; delete hashes[k];
     });
     var sb = settingsBody(S.settings || {});
     if (hashes.settings !== sb) { S.settingsU = now; hashes.settings = sb; }
+    var ab = JSON.stringify(S.ai || null); // AI settings for photo lessons (provider, model, key)
+    if (hashes.ai !== ab) { S.aiU = now; hashes.ai = ab; }
   }
   function cardScore(c) { return [(c.srs && c.srs.reps) || 0, c.u || 0]; }
   function merge(local, remote, now) {
@@ -83,6 +86,7 @@
       out.settings = Object.assign({}, remote.settings, { theme: (local.settings || {}).theme });
       out.settingsU = remote.settingsU;
     }
+    if ((remote.aiU || 0) > (local.aiU || 0) && remote.ai) { out.ai = remote.ai; out.aiU = remote.aiU; }
     out.deleted = del;
     return out;
   }
@@ -94,5 +98,26 @@
     var bare = t.match(/\b(ghp_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+)\b/);
     return bare ? bare[1] : null;
   }
-  g.HFSync = { baseline: baseline, stamp: stamp, merge: merge, tokenFromPaste: tokenFromPaste };
+  /* The AI key is encrypted (AES-GCM, key derived from the sync token) before it goes into the gist:
+   * a secret gist is readable by anyone with its link, and GitHub's secret scanning could get a
+   * plain key revoked. Only devices holding the sync token can open it. */
+  var b64 = function (buf) { return btoa(String.fromCharCode.apply(null, new Uint8Array(buf))); };
+  var unb64 = function (s) { return Uint8Array.from(atob(s), function (c) { return c.charCodeAt(0); }); };
+  function aiCryptoKey(token) {
+    return g.crypto.subtle.digest("SHA-256", new TextEncoder().encode("hanziflow-ai:" + token))
+      .then(function (h) { return g.crypto.subtle.importKey("raw", h, "AES-GCM", false, ["encrypt", "decrypt"]); });
+  }
+  function sealAi(ai, token) {
+    var iv = g.crypto.getRandomValues(new Uint8Array(12));
+    return aiCryptoKey(token).then(function (k) {
+      return g.crypto.subtle.encrypt({ name: "AES-GCM", iv: iv }, k, new TextEncoder().encode(JSON.stringify(ai)));
+    }).then(function (ct) { return { v: 1, iv: b64(iv), ct: b64(ct) }; });
+  }
+  function openAi(sealed, token) {
+    if (!sealed || sealed.v !== 1 || !sealed.iv || !sealed.ct) return Promise.resolve(null);
+    return aiCryptoKey(token).then(function (k) {
+      return g.crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(sealed.iv) }, k, unb64(sealed.ct));
+    }).then(function (pt) { return JSON.parse(new TextDecoder().decode(pt)); }, function () { return null; });
+  }
+  g.HFSync = { baseline: baseline, stamp: stamp, merge: merge, tokenFromPaste: tokenFromPaste, sealAi: sealAi, openAi: openAi };
 })(typeof window !== "undefined" ? window : globalThis);

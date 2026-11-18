@@ -973,7 +973,8 @@ $("#set-target").onchange=e=>{S.settings.target=Math.max(1,+e.target.value||20);
 $("#set-newcap").onchange=e=>{S.settings.newCap=Math.max(0,+e.target.value||0);save();toast("New-card cap saved")};
 $("#set-dark").onchange=e=>{setTheme(e.target.checked?"dark":"light")};
 $("#btn-export").onclick=()=>{
-  const blob=new Blob([JSON.stringify(S,null,1)],{type:"application/json"});
+  const {ai,aiU,...backup}=S; // the AI key travels by sync only, never in a backup file
+  const blob=new Blob([JSON.stringify(backup,null,1)],{type:"application/json"});
   const a=document.createElement("a");a.href=URL.createObjectURL(blob);
   a.download="hanziflow-backup-"+todayStr()+".json";a.click();URL.revokeObjectURL(a.href);
   toast("Backup downloaded");
@@ -1005,7 +1006,7 @@ $("#file-import").onchange=e=>{
     const mode=await hfDialog({title:"Import backup",body:`${data.decks.length} decks and ${data.cards.length} cards found.`,
       actions:[{label:"Merge — add what's missing",value:"merge"},{label:"Replace everything",kind:"danger",value:"replace"},{label:"Cancel",kind:"ghost",value:null}]});
     if(!mode)return;
-    if(mode==="replace"){S=Object.assign(migrateV1toV2(data),{deleted:S.deleted||{}});toast("Backup restored")}
+    if(mode==="replace"){S=Object.assign(migrateV1toV2(data),{deleted:S.deleted||{},ai:S.ai,aiU:S.aiU});toast("Backup restored")}
     else toast(`Merged — ${mergeBackup(data)} new cards`);
     save();setTheme(S.settings.theme);go("home");repairBlankCards();
   };
@@ -1095,6 +1096,10 @@ async function syncNow(manual){
     if(!syncCfg.gistId)syncCfg.gistId=await findSyncGist();
     let remote=null;
     if(syncCfg.gistId)remote=await readSyncGist(syncCfg.gistId);
+    if(remote&&remote.ai){ // stored encrypted; drop it if this device can't open it
+      remote.ai=await window.HFSync.openAi(remote.ai,syncCfg.token);
+      if(!remote.ai){delete remote.ai;delete remote.aiU}
+    }
     const before=JSON.stringify({d:S.decks,c:S.cards});
     if(remote&&Array.isArray(remote.cards)){
       const merged=window.HFSync.merge(S,migrateV1toV2(remote));
@@ -1102,11 +1107,14 @@ async function syncNow(manual){
     }
     window.HFSync.baseline(S,syncHashes);
     localStorage.setItem(KEY,JSON.stringify(S));
-    const payload=JSON.stringify(S);
+    const changed=!remote||JSON.stringify(remote)!==JSON.stringify(S);
+    const upload=Object.assign({},S);
+    if(S.ai)upload.ai=await window.HFSync.sealAi(S.ai,syncCfg.token);
+    const payload=JSON.stringify(upload);
     if(!syncCfg.gistId){
       const g=await gh("/gists",{method:"POST",body:JSON.stringify({description:SYNC_DESC,public:false,files:{[SYNC_FILE]:{content:payload}}})});
       syncCfg.gistId=g.id;
-    }else if(!remote||JSON.stringify(remote)!==payload){
+    }else if(changed){
       await gh("/gists/"+syncCfg.gistId,{method:"PATCH",body:JSON.stringify({files:{[SYNC_FILE]:{content:payload}}})});
     }
     syncCfg.last=Date.now();syncCfg.error="";saveSyncCfg();

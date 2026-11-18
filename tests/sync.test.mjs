@@ -107,4 +107,32 @@ t('pairing token is read from a link, a bare token, or surrounding text', () => 
   assert.equal(Y.tokenFromPaste('hello there'), null);
   assert.equal(Y.tokenFromPaste(''), null);
 });
+t('AI key set on the PC reaches the phone', () => {
+  const pc = device(state()), phone = device(state());
+  pc.edit(S => { S.ai = { presetId: 'openrouter', model: 'm', apiKey: 'sk-or-1' }; }, 1000);
+  assert.ok(pc.S.aiU === 1000);
+  const m = Y.merge(phone.S, clone(pc.S), 2000);
+  assert.equal(m.ai.apiKey, 'sk-or-1');
+});
+t('newer AI settings win, older ones do not overwrite', () => {
+  const pc = device(state()), phone = device(state());
+  pc.edit(S => { S.ai = { apiKey: 'old' }; }, 1000);
+  phone.edit(S => { S.ai = { apiKey: 'new' }; }, 2000);
+  assert.equal(Y.merge(pc.S, clone(phone.S), 3000).ai.apiKey, 'new');
+  assert.equal(Y.merge(phone.S, clone(pc.S), 3000).ai.apiKey, 'new');
+});
+t('a device without AI settings keeps its own when the other has none', () => {
+  const a = state(); a.ai = { apiKey: 'k' }; a.aiU = 5;
+  assert.equal(Y.merge(a, state(), 10).ai.apiKey, 'k');
+});
+// async: AI key encrypted for the gist
+const at = async (name, fn) => { await fn(); n++; console.log('ok  ' + name); };
+await at('AI settings are sealed for the gist and open only with the same sync key', async () => {
+  const ai = { presetId: 'openrouter', model: 'm', apiKey: 'sk-or-v1-SECRET' };
+  const sealed = await Y.sealAi(ai, 'ghp_token1');
+  assert.ok(!JSON.stringify(sealed).includes('SECRET'));
+  assert.deepEqual(await Y.openAi(sealed, 'ghp_token1'), ai);
+  assert.equal(await Y.openAi(sealed, 'ghp_other'), null);
+  assert.equal(await Y.openAi({ junk: 1 }, 'ghp_token1'), null);
+});
 console.log(`\n${n} passed, 0 failed`);
