@@ -7,3 +7,6 @@ boundaries, modern words have hand-written examples (`tools/modern_examples.json
 generic example.
 
 Remaining: merge to `main` to deploy, then check the live site and re-import a real backup.
+
+
+Lessons tab and HSK decks: on branch `lessons` (design and plan in `docs/superpowers/`). Merge to `main` to deploy.

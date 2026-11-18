@@ -193,7 +193,7 @@ function studyQueue(deckId){
 }
 
 /* ============ router ============ */
-const SCREENS=["home","weeks","week-detail","add","study","quiz","browse","stats","settings"];
+const SCREENS=["home","weeks","week-detail","lessons","add","study","quiz","browse","stats","settings"];
 let curScreen="home";
 function placeBubble(){
   const on=$("nav.tabs button.on"),b=$(".bubble");
@@ -217,6 +217,7 @@ function go(name){
   if(name==="browse"){browseLimit=BROWSE_PAGE;renderBrowse()}
   if(name==="stats")renderStats();
   if(name==="settings")renderSettings();
+  if(name==="lessons"&&window.renderLessons)window.renderLessons();
   window.scrollTo(0,0);
   if(syncPending&&!syncBusyScreen())syncNow();
 }
@@ -281,6 +282,7 @@ function renderWeeks(){
   list.innerHTML=S.decks.map(weekItemHTML).join("")||`<div class="empty"><div class="big zh">卡</div>No decks yet.<br>Tap “+ New Week” to start.</div>`;
   bindWeekItems(list);
 }
+$("#btn-hsk-deck").onclick=()=>{if(window.openHskPicker)window.openHskPicker()};
 $("#btn-new-week").onclick=()=>{
   const d={id:uid(),name:"Week "+(S.decks.length+1),created:todayStr()};
   S.decks.push(d);save();startPaste(d.id);
@@ -925,6 +927,7 @@ function renderStats(){
 /* ============ settings ============ */
 function renderSettings(){
   renderSyncCard();
+  if(window.renderAiCard)window.renderAiCard($("#ai-card"));
   $("#set-target").value=S.settings.target;
   $("#set-newcap").value=S.settings.newCap;
   $("#set-dark").checked=S.settings.theme==="dark";

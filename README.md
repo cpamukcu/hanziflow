@@ -23,6 +23,16 @@ Every row shows its status:
 
 About 14,000 words have a real example sentence. Rarer words get a clearly labelled generic one (`「蓝藻」是什么意思？`), which you can replace.
 
+## Lessons
+
+The **Lessons** tab turns your textbook into interactive practice:
+
+- **From photos:** photograph a lesson's pages (up to 8). An AI model reads them once and the lesson runs through New words → Listen & pick → Read the text → Grammar → Build it → Check-up. Items you miss come first next time. The lesson's words can become a deck, so they join *Study Now*.
+- **Grammar** (12 HSK 2/3 points) and **Dialogues** (16) are built in and need no AI.
+- Reading photos needs a free [OpenRouter](https://openrouter.ai/keys) key (Settings → *AI for photo lessons*). The model must accept images; the default is `google/gemma-4-31b-it:free`. The key stays on each device: it is never synced or exported.
+
+**HSK decks:** Decks → *+ HSK deck* adds any HSK 2.0 level (1–5) or HSK 3.0 band (1–6), skipping words you already have. New cards still arrive at your *New cards per session* rate.
+
 ## Project layout
 
 ```
@@ -31,6 +41,9 @@ assets/theme.css      Liquid Glass design system
 js/lookup.js          normalise, segment, look up (window.HF)
 js/srs.js             pure scheduling logic (window.HFSRS)
 js/app.js             screens and storage
+js/lesson-core.js     lesson parsing and exercises (window.HFLesson)
+js/lessons.js         Lessons tab, AI settings card, HSK deck picker
+data/hsk-content.js   HSK lists, grammar points, dialogues (tools/extract_hsk.mjs)
 data/dictionary.js    core dictionary, loaded at startup (3 MB)
 data/dictionary-extra.js  rest of CC-CEDICT, loaded on first add (11 MB)
 vendor/               local copies of pinyin-pro and Chart.js
