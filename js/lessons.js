@@ -142,8 +142,11 @@
       <div class="card">
         <h2 style="margin-top:0">New lesson from photos</h2>
         <p class="muted">Add the lesson's pages in order: new words, the text and the grammar notes. Flat, bright and in focus works best.</p>
-        ${photos.length < MAX_PHOTOS ? `<label class="btn holo" style="cursor:pointer;margin:10px 0">📷 ${photos.length ? "Add more pages" : "Take or choose photos"}
-          <input type="file" id="ph-file" accept="image/*" multiple style="display:none"></label>` : ""}
+        ${photos.length < MAX_PHOTOS ? `<div class="row" style="gap:8px;margin:10px 0">
+          <button class="btn holo" id="ph-cam" style="flex:1">📷 ${photos.length ? "Take more pages" : "Take photos"}</button>
+          <label class="btn ghost" style="flex:1;cursor:pointer">🖼 From album
+            <input type="file" id="ph-file" accept="image/*" multiple style="display:none"></label></div>
+          <input type="file" id="ph-snap" accept="image/*" capture="environment" style="display:none">` : ""}
         <div class="muted" style="text-align:center">${photos.length} / ${MAX_PHOTOS} photos</div>
         ${photos.length ? `<div class="ls-thumbs">${photos.map((p, i) => `<div class="ls-thumb"><img src="${p.url}" alt="Page ${i + 1}"><span>${i + 1}</span>
           <button class="icon-btn" data-rm="${i}" aria-label="Remove photo">✕</button></div>`).join("")}</div>` : ""}
@@ -152,17 +155,86 @@
         <button class="btn coral" id="ph-make" style="margin-top:12px" ${photos.length ? "" : "disabled"}>Make lesson</button>
       </div>`;
     $("#ph-back").onclick = () => { clearPhotos(); renderLessons(); };
+    const cam = $("#ph-cam");
+    if (cam) cam.onclick = openCamera;
+    const snap = $("#ph-snap");
+    if (snap) snap.onchange = (e) => { addPhotoFiles(e.target.files); };
     const f = $("#ph-file");
-    if (f) f.onchange = (e) => {
-      const files = [...(e.target.files || [])].filter((x) => x.type.startsWith("image/"));
-      let over = false;
-      for (const x of files) { if (photos.length < MAX_PHOTOS) photos.push({ file: x, url: URL.createObjectURL(x) }); else over = true; }
-      renderPhotos(over ? `Up to ${MAX_PHOTOS} photos per lesson.` : null);
-    };
+    if (f) f.onchange = (e) => addPhotoFiles(e.target.files);
     flow().querySelectorAll("[data-rm]").forEach((b) => b.onclick = () => { const p = photos.splice(+b.dataset.rm, 1)[0]; URL.revokeObjectURL(p.url); renderPhotos(); });
     const link = $("#ph-ai"); if (link) link.onclick = (e) => { e.preventDefault(); go("settings"); };
     $("#ph-make").onclick = makeLesson;
   }
+  function addPhotoFiles(list) {
+    const files = [...(list || [])].filter((x) => x.type.startsWith("image/"));
+    let over = false;
+    for (const x of files) { if (photos.length < MAX_PHOTOS) photos.push({ file: x, url: URL.createObjectURL(x) }); else over = true; }
+    renderPhotos(over ? `Up to ${MAX_PHOTOS} photos per lesson.` : null);
+  }
+
+  /* In-app camera: stays open so you can photograph page after page, then tap Done once.
+   * Falls back to the phone's one-shot camera when the browser can't open the camera here. */
+  async function openCamera() {
+    let stream;
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("no camera API");
+      stream = await navigator.mediaDevices.getUserMedia({ audio: false,
+        video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1440 } } });
+    } catch (e) {
+      console.warn("[HanziFlow] in-app camera unavailable", e);
+      const snap = $("#ph-snap");
+      if (snap) snap.click();
+      return;
+    }
+    const root = $("#dialog-root"), shots = [];
+    root.innerHTML = `<div class="ls-cam" role="dialog" aria-modal="true" aria-label="Take photos">
+      <video id="cam-v" autoplay playsinline muted></video>
+      <div class="ls-cam-flash" id="cam-flash"></div>
+      <div class="ls-cam-top"><span id="cam-count"></span><button class="btn small ghost" id="cam-x">Cancel</button></div>
+      <div class="ls-cam-strip" id="cam-strip"></div>
+      <div class="ls-cam-bar"><span class="ls-cam-hint">Fill the frame with one page</span>
+        <button class="ls-shutter" id="cam-shoot" aria-label="Take photo"></button>
+        <button class="btn small coral" id="cam-done">Done</button></div></div>`;
+    const v = $("#cam-v");
+    let ready = false;
+    v.addEventListener("loadeddata", () => { ready = true; update(); });
+    v.srcObject = stream;
+    v.play().catch(() => {});
+    const left = () => MAX_PHOTOS - photos.length - shots.length;
+    const update = () => {
+      $("#cam-count").textContent = ready ? `${photos.length + shots.length} / ${MAX_PHOTOS} pages` : "Starting camera…";
+      $("#cam-strip").innerHTML = shots.map((s) => `<img src="${s.url}" alt="">`).join("");
+      $("#cam-shoot").disabled = !ready || left() <= 0;
+      $("#cam-done").textContent = shots.length ? `Done (${shots.length})` : "Done";
+    };
+    const close = (keep) => {
+      stream.getTracks().forEach((t) => t.stop());
+      document.removeEventListener("visibilitychange", onHide);
+      root.innerHTML = "";
+      if (keep) shots.forEach((s) => photos.push(s)); else shots.forEach((s) => URL.revokeObjectURL(s.url));
+      renderPhotos();
+    };
+    const onHide = () => { if (document.hidden) close(true); }; // keep what was taken if the app goes to the background
+    document.addEventListener("visibilitychange", onHide);
+    $("#cam-x").onclick = () => close(false);
+    $("#cam-done").onclick = () => close(true);
+    $("#cam-shoot").onclick = () => {
+      if (left() <= 0 || !v.videoWidth) return;
+      const scale = Math.min(1, MAX_SIDE / Math.max(v.videoWidth, v.videoHeight));
+      const c = document.createElement("canvas");
+      c.width = Math.round(v.videoWidth * scale); c.height = Math.round(v.videoHeight * scale);
+      c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
+      c.toBlob((blob) => {
+        if (!blob) return;
+        shots.push({ file: new File([blob], `page-${photos.length + shots.length + 1}.jpg`, { type: "image/jpeg" }), url: URL.createObjectURL(blob) });
+        update();
+        if (left() <= 0) toast(`That's ${MAX_PHOTOS} pages, the most for one lesson`);
+      }, "image/jpeg", 0.85);
+      const fl = $("#cam-flash"); fl.classList.remove("on"); void fl.offsetWidth; fl.classList.add("on");
+    };
+    update();
+  }
+
   async function resizeImage(file) {
     let src;
     try { src = await createImageBitmap(file); }
