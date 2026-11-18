@@ -22,6 +22,7 @@
     if (!S.ai) {
       const legacy = readJSON(AI_KEY, null);
       if (legacy && legacy.apiKey) { S.ai = legacy; save(); }
+      try { localStorage.removeItem(AI_KEY); } catch (e) { /* nothing to clean up */ }
     }
     const d = S.ai || {};
     const p = L.PRESETS[0];
