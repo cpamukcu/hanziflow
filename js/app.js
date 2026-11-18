@@ -1029,7 +1029,7 @@ let syncCfg={token:"",gistId:"",last:0,error:""};
 try{syncCfg=Object.assign(syncCfg,JSON.parse(localStorage.getItem(SYNC_KEY)||"{}"))}catch(e){console.warn("[HanziFlow] sync settings unreadable",e)}
 function saveSyncCfg(){localStorage.setItem(SYNC_KEY,JSON.stringify(syncCfg))}
 let syncTimer=null,syncRunning=false,syncPending=false;
-const syncBusyScreen=()=>["study","quiz","add"].includes(curScreen); // never swap data under an open card
+const syncBusyScreen=()=>["study","quiz","add"].includes(curScreen)||(curScreen==="lessons"&&!!(window.lessonsBusy&&window.lessonsBusy())); // never swap data under an open card
 function scheduleSync(){
   if(!syncCfg.token)return;
   clearTimeout(syncTimer);

@@ -243,9 +243,13 @@
   }
   // A HanziFlow card. Lesson words keep the book's pinyin/meaning (the dictionary fills gaps and
   // the example); HSK words prefer the dictionary and fall back to the list.
+  // Only trusted dictionary rows (curated/dictionary) may supply pinyin or meaning;
+  // pieced-together guesses never land on a card unflagged.
   function cardFor(deckId, w, o) {
     const r = rowFromLookup(HF.lookup(w));
-    const pin = (o.p || r.p || o.fallbackP || "").trim(), mean = (o.m || r.m || o.fallbackM || "").trim();
+    const trusted = ["curated", "dictionary"].includes(rowStatus(r));
+    const pin = (o.p || (trusted ? r.p : "") || o.fallbackP || "").trim();
+    const mean = (o.m || (trusted ? r.m : "") || o.fallbackM || "").trim();
     const source = o.source;
     return { id: uid(), deckId, w, p: pin, m: mean, h: r.h, s: r.s, source, confidence: r.confidence,
       needsReview: !mean, dictionaryVersion: window.HF_DATA ? HF_DATA.version : "", exampleSource: r.exampleSource, srs: newSRS() };
@@ -530,7 +534,7 @@
         const name = std + " · " + lv;
         let deck = S.decks.find((d) => d.name === name);
         if (!deck) { deck = { id: uid(), name, created: todayStr() }; S.decks.push(deck); }
-        plan.add.forEach((x) => S.cards.push(cardFor(deck.id, x.w, { fallbackP: x.p.replace(/\s+/g, ""), fallbackM: x.m.replace(/…$/, ""), source: "hsk" })));
+        plan.add.forEach((x) => S.cards.push(cardFor(deck.id, x.w, { fallbackP: x.p, fallbackM: x.m.replace(/…$/, ""), source: "hsk" })));
         save();
         close();
         toast(`Added ${plan.add.length} card${plan.add.length === 1 ? "" : "s"} to “${name}”${plan.skipped ? ` · ${plan.skipped} you already had` : ""}`);
@@ -540,6 +544,8 @@
     draw();
   }
 
+  // True while something unsaved is on screen (photos, review, a lesson in progress): sync must not re-render.
+  window.lessonsBusy = () => !!run || photos.length > 0 || !!$("#rv-start");
   window.renderLessons = () => { if (run) renderStep(); else renderLessons(); };
   window.renderAiCard = renderAiCard;
   window.startLessonById = startLesson;
