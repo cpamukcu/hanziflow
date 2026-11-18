@@ -331,10 +331,23 @@
     };
   }
 
+  // Which words of an HSK list still need adding: skips words already in HanziFlow and repeats.
+  function hskDeckPlan(list, existing) {
+    const seen = new Set(existing);
+    const add = [];
+    let skipped = 0;
+    for (const [w, p, m] of list) {
+      if (seen.has(w)) { skipped++; continue; }
+      seen.add(w);
+      add.push({ w, p, m });
+    }
+    return { add, skipped };
+  }
+
   const api = {
     EXTRACTION_PROMPT, validateLesson, parseModelReply,
     segment, makeListenPick, makeGrammarBlanks, makeBuild, makeCheckup, buildSteps,
-    PRESETS, buildExtractionRequest, errorMessage, readReply, builtinLesson,
+    PRESETS, buildExtractionRequest, errorMessage, readReply, builtinLesson, hskDeckPlan,
   };
 
   g.HFLesson = api;
