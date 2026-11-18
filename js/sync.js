@@ -86,5 +86,13 @@
     out.deleted = del;
     return out;
   }
-  g.HFSync = { baseline: baseline, stamp: stamp, merge: merge };
+  /* The sync key from whatever was pasted: a pairing link (#hfsync=…), a bare token, or either inside other text. */
+  function tokenFromPaste(text) {
+    var t = String(text || "");
+    var link = t.match(/#hfsync=([^\s#]+)/);
+    if (link) { try { return decodeURIComponent(link[1]).trim() || null; } catch (e) { return null; } }
+    var bare = t.match(/\b(ghp_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+)\b/);
+    return bare ? bare[1] : null;
+  }
+  g.HFSync = { baseline: baseline, stamp: stamp, merge: merge, tokenFromPaste: tokenFromPaste };
 })(typeof window !== "undefined" ? window : globalThis);

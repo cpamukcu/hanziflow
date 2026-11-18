@@ -98,4 +98,13 @@ t('state without lessons merges fine', () => {
   assert.deepEqual(Y.merge(a, clone(b), 10).lessons.map(l => l.id), ['l1']);
   assert.deepEqual(Y.merge(state(), state(), 10).lessons, []);
 });
+t('pairing token is read from a link, a bare token, or surrounding text', () => {
+  const tok = 'ghp_abcDEF123456';
+  assert.equal(Y.tokenFromPaste('https://cpamukcu.github.io/hanziflow/#hfsync=' + encodeURIComponent(tok)), tok);
+  assert.equal(Y.tokenFromPaste('  ' + tok + '\n'), tok);
+  assert.equal(Y.tokenFromPaste('My link: https://x.io/h/#hfsync=' + tok + ' thanks'), tok);
+  assert.equal(Y.tokenFromPaste('github_pat_11ABC_def'), 'github_pat_11ABC_def');
+  assert.equal(Y.tokenFromPaste('hello there'), null);
+  assert.equal(Y.tokenFromPaste(''), null);
+});
 console.log(`\n${n} passed, 0 failed`);
