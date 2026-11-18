@@ -289,3 +289,26 @@ test("builtinLesson with empty lookup still has steps", () => {
   const d = C.builtinLesson("dialog", dialogItem, 1, () => null, (t) => Array.from(t));
   assert.ok(C.buildSteps(d).includes("read"));
 });
+
+// ---------- polish: small review findings ----------
+
+test("parseModelReply skips a brace in prose and a broken first object", () => {
+  const good = JSON.stringify({ title: "t", words: [{ hanzi: "茶", pinyin: "chá", meaning: "tea" }] });
+  assert.equal(C.parseModelReply("Use {curly} braces? Here: " + good).ok, true);
+  assert.equal(C.parseModelReply('{"a":1,} then ' + good).ok, true);
+});
+
+test("errorMessage: big uploads and unknown models get their own advice", () => {
+  assert.match(C.errorMessage(413, "image too large"), /fewer|smaller/i);
+  assert.doesNotMatch(C.errorMessage(413, "image too large"), /can't read photos/i);
+  assert.match(C.errorMessage(400, "google/xyz is not a valid model ID"), /model/i);
+  assert.match(C.errorMessage(400, "google/xyz is not a valid model ID"), /settings/i);
+});
+
+test("makeGrammarBlanks never leaves the answer visible elsewhere in the sentence", () => {
+  const l = lessonWith({
+    words: [W("看"), W("书")],
+    grammar: [{ point: "看看", explanation: "", examples: [{ hanzi: "我看看书，你也看看。", pinyin: "", english: "" }] }],
+  });
+  for (const it of C.makeGrammarBlanks(l, seeded(3))) assert.ok(!it.prompt.includes(it.answer), it.prompt);
+});
