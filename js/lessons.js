@@ -16,13 +16,22 @@
     try { const v = JSON.parse(localStorage.getItem(key)); return v && typeof v === "object" ? v : fallback; } catch (e) { return fallback; }
   }
   function writeJSON(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); return true; } catch (e) { return false; } }
-  let aiSession = null; // used when storage is blocked
+  // AI settings live in the synced state (S.ai), so a key entered once reaches every device.
+  // Older versions kept them per device in localStorage["hanziflow.ai"]; move those over once.
   function loadAi() {
-    const d = aiSession || readJSON(AI_KEY, {});
+    if (!S.ai) {
+      const legacy = readJSON(AI_KEY, null);
+      if (legacy && legacy.apiKey) { S.ai = legacy; save(); }
+    }
+    const d = S.ai || {};
     const p = L.PRESETS[0];
     return { presetId: d.presetId || p.id, baseUrl: d.baseUrl || p.baseUrl, model: d.model || p.model, apiKey: d.apiKey || "" };
   }
-  function saveAi(s) { aiSession = writeJSON(AI_KEY, s) ? null : s; }
+  function saveAi(s) {
+    S.ai = { presetId: s.presetId, baseUrl: s.baseUrl, model: s.model, apiKey: s.apiKey };
+    save();
+    try { localStorage.removeItem(AI_KEY); } catch (e) { /* nothing to clean up */ }
+  }
   const aiReady = (s) => !!(s.apiKey && s.model && /^https?:\/\//.test(s.baseUrl));
   function getProg(id) {
     const p = readJSON(PROG_KEY, {})[id] || {};
@@ -487,7 +496,7 @@
     const draw = () => {
       const p = L.PRESETS.find((x) => x.id === draft.presetId) || L.PRESETS[L.PRESETS.length - 1];
       el.innerHTML = `<b>AI for photo lessons</b>
-        <p class="muted" style="margin:4px 0 8px">Reads textbook photos. Your key stays on this device: it is not synced or included in backups.</p>
+        <p class="muted" style="margin:4px 0 8px">Reads textbook photos. Your key syncs to your other devices through your private sync gist; it is never included in backup files.</p>
         <label class="lbl" for="ai-preset">Provider</label>
         <select id="ai-preset">${L.PRESETS.map((x) => `<option value="${esc(x.id)}" ${x.id === p.id ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select>
         <p class="muted" style="margin:6px 0">${esc(p.note)}</p>
