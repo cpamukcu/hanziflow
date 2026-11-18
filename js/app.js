@@ -259,6 +259,32 @@ function renderHome(){
   const hw=$("#home-weeks");
   hw.innerHTML=S.decks.slice(-3).reverse().map(weekItemHTML).join("")||`<div class="empty"><div class="big zh">汉</div>No decks yet. Tap “Add words” to create your first one.</div>`;
   bindWeekItems(hw);
+  renderRestoreCard();
+}
+/* A new home-screen app on iPhone starts empty (it doesn't share Safari's storage): offer to bring the cards back. */
+function renderRestoreCard(){
+  const box=$("#home-restore");if(!box)return;
+  if(syncCfg.token||S.cards.length){box.innerHTML="";return}
+  box.innerHTML=`<div class="card">
+    <b>Bring your cards here</b>
+    <p class="muted" style="margin:6px 0 10px">Just added HanziFlow to your home screen? It starts empty: the home-screen app and Safari keep separate cards.
+      On a device that already syncs, open Settings → Connect another device → Copy link, send it to this phone, copy it, then tap below.</p>
+    <div class="row wrap" style="gap:8px"><button class="btn small coral" id="restore-paste">Paste sync link</button>
+      <button class="btn small ghost" data-go="settings">Restore a backup</button></div></div>`;
+  $("#restore-paste").onclick=pasteSyncLink;
+}
+async function pasteSyncLink(){
+  let text="";
+  try{text=await navigator.clipboard.readText()}catch(e){/* no clipboard access: ask instead */}
+  let token=window.HFSync.tokenFromPaste(text);
+  if(!token){
+    const typed=await hfDialog({title:"Paste your sync link",body:"Long-press in the box and choose Paste.",input:"",
+      actions:[{label:"Connect"},{label:"Cancel",kind:"ghost",value:null}]});
+    if(typed==null)return;
+    token=window.HFSync.tokenFromPaste(typed);
+    if(!token)return toast("That doesn't look like a HanziFlow sync link");
+  }
+  if(await connectWithToken(token)){toast("Connected — your cards are on their way");renderHome()}
 }
 function bindWeekItems(root){
   root.querySelectorAll(".week-item").forEach(el=>{
@@ -1159,7 +1185,7 @@ async function showPairDialog(){
   const link=pairLink();
   const canShare=!!navigator.share;
   const v=await hfDialog({title:"Connect your phone",
-    body:"Send this link to your phone (AirDrop, Messages, or copy here and paste on iPhone). Open it in the HanziFlow you use there and tap Connect. The link holds your sync key, so only send it to yourself.",
+    body:"Send this link to your phone (AirDrop, WeChat, Messages). In the browser, just open it and tap Connect. In the home-screen app on iPhone, copy the link, open the app and tap “Paste sync link” on Home (or paste it in Settings → Sync). The link holds your sync key, so only send it to yourself.",
     actions:[...(canShare?[{label:"Share link…",value:"share"}]:[]),{label:"Copy link",kind:canShare?"ghost":"",value:"copy"},{label:"Close",kind:"ghost",value:null}]});
   if(v==="share"){try{await navigator.share({title:"HanziFlow sync",url:link})}catch(e){}}
   if(v==="copy"){
