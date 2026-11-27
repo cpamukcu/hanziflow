@@ -201,6 +201,24 @@ test("buildExtractionRequest sends one image part per photo and no response_form
   assert.equal(parts[1].image_url.url, "data:image/jpeg;base64,AA");
 });
 
+test("buildExtractionRequest adds free backup models on OpenRouter only", () => {
+  const body = (settings) => JSON.parse(C.buildExtractionRequest(settings, ["data:image/jpeg;base64,AA"]).init.body);
+  const or = body({ baseUrl: "https://openrouter.ai/api/v1", model: "google/gemma-4-31b-it:free", apiKey: "k" });
+  assert.equal(or.model, "google/gemma-4-31b-it:free");
+  assert.equal(or.models[0], "google/gemma-4-31b-it:free");
+  assert.equal(or.models.length, 3);
+  assert.equal(new Set(or.models).size, 3);
+  assert.ok(or.models.includes("nvidia/nemotron-3.5-super-vl:free"));
+  const own = body({ baseUrl: "https://openrouter.ai/api/v1", model: "my/model", apiKey: "k" });
+  assert.deepEqual(own.models, ["my/model", ...C.FREE_IMAGE_MODELS.slice(0, 2)]);
+  const other = body({ baseUrl: "https://api.example.com/v1", model: "m", apiKey: "k" });
+  assert.equal("models" in other, false);
+});
+
+test("OpenRouter preset defaults to the first free image model", () => {
+  assert.equal(C.PRESETS[0].model, C.FREE_IMAGE_MODELS[0]);
+});
+
 test("errorMessage maps provider failures", () => {
   assert.match(C.errorMessage(null, ""), /internet|reach/i);
   assert.match(C.errorMessage(401, ""), /key/i);

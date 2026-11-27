@@ -232,12 +232,20 @@
 
   // ---------- Settings, saving, provider calls ----------
 
+  // Free OpenRouter models that read images. OpenRouter tries them in order when the
+  // chosen one is busy (free models are often rate-limited upstream).
+  const FREE_IMAGE_MODELS = [
+    "nvidia/nemotron-3.5-super-vl:free",
+    "google/gemma-4-31b-it:free",
+    "google/gemma-4-26b-a4b-it:free",
+  ];
+
   const PRESETS = [
     {
       id: "openrouter",
       label: "OpenRouter (free models)",
       baseUrl: "https://openrouter.ai/api/v1",
-      model: "google/gemma-4-31b-it:free",
+      model: FREE_IMAGE_MODELS[0],
       editableModel: true,
       signupUrl: "https://openrouter.ai/keys",
       note: "Free account, no card. The model must accept images: if this one stops working, pick another ending in :free that lists \"image\" input at openrouter.ai/models.",
@@ -259,6 +267,11 @@
       { type: "text", text: "Extract this lesson. The photos are its pages in order." },
       ...imageDataUrls.map((url) => ({ type: "image_url", image_url: { url } })),
     ];
+    // On OpenRouter, send backup models so a busy free model doesn't fail the lesson.
+    // OpenRouter accepts at most 3 models in this list.
+    const models = /^https:\/\/openrouter\.ai\//.test(baseUrl + "/")
+      ? [...new Set([settings.model, ...FREE_IMAGE_MODELS])].slice(0, 3)
+      : null;
     return {
       url: baseUrl + "/chat/completions",
       init: {
@@ -266,6 +279,7 @@
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + settings.apiKey },
         body: JSON.stringify({
           model: settings.model,
+          ...(models ? { models } : {}),
           temperature: 0.2,
           max_tokens: 8000,
           stream: false,
@@ -358,7 +372,7 @@
   const api = {
     EXTRACTION_PROMPT, validateLesson, parseModelReply,
     segment, makeListenPick, makeGrammarBlanks, makeBuild, makeCheckup, buildSteps,
-    PRESETS, buildExtractionRequest, errorMessage, readReply, builtinLesson, hskDeckPlan, hskDeckName,
+    PRESETS, FREE_IMAGE_MODELS, buildExtractionRequest, errorMessage, readReply, builtinLesson, hskDeckPlan, hskDeckName,
   };
 
   g.HFLesson = api;
