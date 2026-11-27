@@ -24,7 +24,9 @@
     const groups = [];
     const inText = HF.extractFromText(text, { includeSingle: true, keepStopwords: true, maxWords: 120 }).map((c) => c.word);
     const plain = Array.from(text).filter(hasHanzi).join("");
-    const isWord = plain === text && plain.length <= 8 && !!HF.lookup(plain, { allowFuzzy: false }).m;
+    const hit = plain === text && plain.length <= 8 ? HF.lookup(plain, { allowFuzzy: false }) : null;
+    // A phrase the dictionary only pieces together (看电影) is split into its words instead.
+    const isWord = !!(hit && hit.m && !hit.pieced);
     if (isWord) {
       groups.push({ title: null, words: [plain] });
       const more = HF.suggest(plain, 12).map((h) => h.word).filter((w) => w !== plain);
