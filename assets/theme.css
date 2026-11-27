@@ -414,3 +414,12 @@ label.lbl{display:block;font-size:13px;color:var(--ink-2);margin:12px 0 4px 4px;
 .ls-shutter{width:72px;height:72px;min-width:72px;padding:0;flex:none;border-radius:50%;border:5px solid #fff;background:#fff;box-shadow:inset 0 0 0 3px #000;cursor:pointer}
 .ls-shutter:active{transform:scale(.92)}
 .ls-shutter:disabled{opacity:.35}
+
+/* ---------- dictionary ---------- */
+.dict-senses{margin:12px 0 0;padding-left:22px}
+.dict-senses li{margin:3px 0}
+.dict-ex{margin-top:12px;padding:10px 12px;border-radius:14px;background:var(--glass-soft);border:1px solid var(--glass-stroke)}
+.dict-card .acts{margin-top:14px}
+.ls-hz span[data-tok],.ls-hz span[data-dtok]{cursor:pointer}
+.lbl-short{display:none}
+@media (max-width:520px){nav.tabs .lbl-long{display:none}nav.tabs .lbl-short{display:inline}}

@@ -110,6 +110,8 @@ ok(cands.every(c => !HF.normalizeList(c.word).length || true), 'candidates well-
 const cands2 = HF.extractFromText('我今天去图书馆看书，因为明天要考试。');
 const words2 = cands2.map(c => c.word);
 ok(!words2.includes('我'), 'stopword 我 filtered');
+const words3 = HF.extractFromText('我们一起去看电影吧', { includeSingle: true, keepStopwords: true }).map(c => c.word);
+ok(['我们', '去', '电影', '吧'].every(w => words3.includes(w)), 'keepStopwords keeps every word for the dictionary');
 
 /* ---------- enrichBatch ---------- */
 const rows = await HF.enrichBatch(['苹果', '环境', '保护', '经济'], {
