@@ -6,7 +6,7 @@
 (function () {
   const L = window.HFLesson;
   const AI_KEY = "hanziflow.ai", PROG_KEY = "hanziflow.lessonProgress";
-  const MAX_PHOTOS = 8, MAX_SIDE = 1600;
+  const MAX_PHOTOS = 24, MAX_SIDE = 1600;
   const STEP_NAMES = { words: "New words", listen: "Listen & pick", read: "Read the text", grammar: "Grammar", build: "Build it", checkup: "Check-up" };
   const flow = () => $("#lessons-flow");
   const rng = Math.random;
@@ -251,24 +251,36 @@
   async function makeLesson() {
     const ai = loadAi();
     if (!aiReady(ai)) return renderPhotos("Add your AI key in Settings first.");
-    flow().innerHTML = `<div class="card summary"><div class="emoji">📖</div><h3>Reading ${photos.length} photo${photos.length === 1 ? "" : "s"}…</h3><p class="muted">This can take up to a minute.</p></div>`;
+    const reading = (text) => {
+      flow().innerHTML = `<div class="card summary"><div class="emoji">📖</div><h3>${esc(text)}</h3><p class="muted">This can take up to a minute${photos.length > L.BATCH_PAGES ? " for each group of pages" : ""}.</p></div>`;
+    };
+    reading(`Reading ${photos.length} photo${photos.length === 1 ? "" : "s"}…`);
     let images;
     try { images = await Promise.all(photos.map((p) => resizeImage(p.file))); }
     catch (e) { return renderPhotos("One of the photos couldn't be opened. Remove it and try again."); }
-    const { url, init } = L.buildExtractionRequest(ai, images);
-    if (typeof AbortSignal !== "undefined" && AbortSignal.timeout) init.signal = AbortSignal.timeout(120000);
-    let res;
-    try { res = await fetch(url, init); }
-    catch (e) { return renderPhotos(e && e.name === "TimeoutError" ? "The AI took too long to answer. Try again, or with fewer photos." : L.errorMessage(null, "")); }
-    if (!res.ok) return renderPhotos(L.errorMessage(res.status, await res.text().catch(() => "")));
-    const reply = L.readReply(await res.json().catch(() => null));
-    if (!reply.ok) return renderPhotos(reply.error === "too_long"
-      ? "This lesson was too long for the AI to answer in one go. Try fewer pages at a time (for example the word list and the text first)."
-      : "The AI sent back an empty answer. Try again, or pick a different model in Settings.");
-    const parsed = L.parseModelReply(reply.text);
-    if (!parsed.ok) return renderPhotos(parsed.error === "no_words"
-      ? "No lesson words were found in these photos. Make sure the new-words page is included and readable."
-      : "Couldn't read the AI's reply. Please try again.");
+    const batches = L.pageBatches(images.length);
+    const raws = [];
+    for (const b of batches) {
+      const pages = b.to - b.from > 1 ? `pages ${b.from + 1}–${b.to}` : `page ${b.from + 1}`;
+      if (batches.length > 1) reading(`Reading ${pages} of ${images.length}…`);
+      const { url, init } = L.buildExtractionRequest(ai, images.slice(b.from, b.to), { ...b, total: images.length });
+      if (typeof AbortSignal !== "undefined" && AbortSignal.timeout) init.signal = AbortSignal.timeout(120000);
+      const where = batches.length > 1 ? ` (${pages})` : "";
+      let res;
+      try { res = await fetch(url, init); }
+      catch (e) { return renderPhotos((e && e.name === "TimeoutError" ? "The AI took too long to answer. Try again, or with fewer photos." : L.errorMessage(null, "")) + where); }
+      if (!res.ok) return renderPhotos(L.errorMessage(res.status, await res.text().catch(() => "")) + where);
+      const reply = L.readReply(await res.json().catch(() => null));
+      if (!reply.ok) return renderPhotos((reply.error === "too_long"
+        ? "This lesson was too long for the AI to answer in one go. Try fewer pages at a time (for example the word list and the text first)."
+        : "The AI sent back an empty answer. Try again, or pick a different model in Settings.") + where);
+      const raw = L.extractJson(reply.text);
+      if (!raw) return renderPhotos("Couldn't read the AI's reply. Please try again." + where);
+      raws.push(raw);
+    }
+    const lesson = L.validateLesson(L.mergeRawLessons(raws));
+    if (!lesson) return renderPhotos("No lesson words were found in these photos. Make sure the new-words page is included and readable.");
+    const parsed = { lesson };
     clearPhotos();
     // The AI may leave pinyin or meanings empty; the dictionary fills the gaps.
     parsed.lesson.words.forEach((w) => {
