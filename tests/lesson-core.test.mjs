@@ -330,3 +330,33 @@ test("makeGrammarBlanks never leaves the answer visible elsewhere in the sentenc
   });
   for (const it of C.makeGrammarBlanks(l, seeded(3))) assert.ok(!it.prompt.includes(it.answer), it.prompt);
 });
+
+test("pageBatches splits long lessons into groups of BATCH_PAGES", () => {
+  assert.deepEqual(C.pageBatches(3), [{ from: 0, to: 3 }]);
+  assert.deepEqual(C.pageBatches(12, 5), [{ from: 0, to: 5 }, { from: 5, to: 10 }, { from: 10, to: 12 }]);
+  assert.deepEqual(C.pageBatches(0), []);
+});
+
+test("mergeRawLessons joins groups in page order and keeps the first title", () => {
+  const merged = C.mergeRawLessons([
+    { title: "第五课", lessonNumber: 5, words: [{ hanzi: "买", pinyin: "mǎi", meaning: "buy" }], texts: [], grammar: [] },
+    { title: "", words: [{ hanzi: "买", pinyin: "mǎi", meaning: "buy" }, { hanzi: "贵", pinyin: "guì", meaning: "expensive" }],
+      texts: [{ title: null, lines: [{ speaker: "A", hanzi: "太贵了！", pinyin: "Tài guì le!", english: "Too expensive!" }] }] },
+    null,
+    { grammar: [{ point: "Adj + 一点儿", explanation: "softer", examples: [{ hanzi: "便宜一点儿吧。", pinyin: "Piányi yìdiǎnr ba.", english: "A bit cheaper." }] }] },
+  ]);
+  assert.equal(merged.title, "第五课");
+  assert.equal(merged.lessonNumber, "5");
+  const lesson = C.validateLesson(merged);
+  assert.deepEqual(lesson.words.map((w) => w.hanzi), ["买", "贵"]);
+  assert.equal(lesson.texts.length, 1);
+  assert.equal(lesson.grammar.length, 1);
+});
+
+test("buildExtractionRequest tells the AI which pages a group holds", () => {
+  const s = { baseUrl: "https://x/v1", model: "m", apiKey: "k" };
+  const text = (imgs, part) => JSON.parse(C.buildExtractionRequest(s, imgs, part).init.body).messages[1].content[0].text;
+  assert.match(text(["a", "b"], { from: 5, to: 7, total: 7 }), /pages 6–7 of the 7 pages/);
+  assert.match(text(["a", "b"], { from: 0, to: 2, total: 2 }), /^Extract this lesson/);
+  assert.match(text(["a"]), /^Extract this lesson/);
+});

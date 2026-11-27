@@ -261,10 +261,36 @@
     },
   ];
 
-  function buildExtractionRequest(settings, imageDataUrls) {
+  // Free models read a few pages well but struggle with many, so long lessons go
+  // to the AI in groups of BATCH_PAGES and the answers are joined afterwards.
+  const BATCH_PAGES = 5;
+  function pageBatches(count, size = BATCH_PAGES) {
+    const out = [];
+    for (let i = 0; i < count; i += size) out.push({ from: i, to: Math.min(count, i + size) });
+    return out;
+  }
+
+  // Joins the raw AI answers for each group of pages into one raw lesson, in page order.
+  function mergeRawLessons(raws) {
+    const parts = raws.filter(isObj);
+    return {
+      title: parts.map((r) => str(r.title)).find(Boolean) || "",
+      lessonNumber: parts.map((r) => (r.lessonNumber == null ? "" : String(r.lessonNumber).trim())).find(Boolean) || null,
+      words: parts.flatMap((r) => arr(r.words)),
+      texts: parts.flatMap((r) => arr(r.texts)),
+      grammar: parts.flatMap((r) => arr(r.grammar)),
+    };
+  }
+
+  // part: {from, to, total} (0-based page range) when the lesson is sent in groups.
+  function buildExtractionRequest(settings, imageDataUrls, part) {
     const baseUrl = String(settings.baseUrl || "").replace(/\/+$/, "");
+    const intro = part && part.total > imageDataUrls.length
+      ? `These photos are pages ${part.from + 1}–${part.to} of the ${part.total} pages of one lesson, in order. ` +
+        "Extract only what is on these pages; use empty arrays for sections that are not on them."
+      : "Extract this lesson. The photos are its pages in order.";
     const content = [
-      { type: "text", text: "Extract this lesson. The photos are its pages in order." },
+      { type: "text", text: intro },
       ...imageDataUrls.map((url) => ({ type: "image_url", image_url: { url } })),
     ];
     // On OpenRouter, send backup models so a busy free model doesn't fail the lesson.
@@ -370,7 +396,7 @@
   }
 
   const api = {
-    EXTRACTION_PROMPT, validateLesson, parseModelReply,
+    EXTRACTION_PROMPT, validateLesson, parseModelReply, extractJson, BATCH_PAGES, pageBatches, mergeRawLessons,
     segment, makeListenPick, makeGrammarBlanks, makeBuild, makeCheckup, buildSteps,
     PRESETS, FREE_IMAGE_MODELS, buildExtractionRequest, errorMessage, readReply, builtinLesson, hskDeckPlan, hskDeckName,
   };
