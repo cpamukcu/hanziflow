@@ -173,7 +173,7 @@
     var i = 0;
     var pushCand = function (word, start, end, hsk, matched) {
       if (seen[word] || out.length >= maxWords) return;
-      if (stops[word]) return;
+      if (stops[word] && !opts.keepStopwords) return;
       if (word.length < (opts.minLen || 1)) return;
       if (word.length === 1 && !(includeSingle || hsk === 1)) return;
       seen[word] = true;

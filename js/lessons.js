@@ -531,20 +531,24 @@
         info.hidden = false;
         info.innerHTML = `<div class="row" style="gap:12px"><div class="zh" style="font-size:30px">${colorHanzi(tok, w && w.pinyin)}</div>
           <div style="flex:1;min-width:0">${w ? `<div>${colorPinyin(w.pinyin)}</div><div class="muted">${esc(w.meaning)}</div>` : `<div class="muted">Not in the dictionary</div>`}</div>
-          ${write(tok, w && w.pinyin)}${say(tok)}</div>`;
+          ${write(tok, w && w.pinyin)}${say(tok)}</div>
+          <button class="btn small ghost" id="rd-dict" style="margin-top:8px">📖 Dictionary · add to deck</button>`;
         bindAudio(info);
+        $("#rd-dict").onclick = () => window.openDictCard && window.openDictCard(tok);
         speak(tok);
       });
     },
     grammar(box) {
       const items = L.makeGrammarBlanks(run.lesson, rng);
-      box.innerHTML = run.lesson.grammar.map((g) => `<div class="card">
+      box.innerHTML = `<p class="muted" style="margin:0 4px 8px">Tap a word in an example to look it up.</p>` + run.lesson.grammar.map((g) => `<div class="card">
           <div class="zh ls-point">${esc(g.point)}</div>
           ${g.explanation ? `<p style="margin:6px 0">${esc(g.explanation)}</p>` : ""}
-          ${g.examples.map((ex) => `<div class="ls-line"><div class="ls-ltext"><div class="zh ls-hz">${esc(ex.hanzi)}</div>
+          ${g.examples.map((ex) => `<div class="ls-line"><div class="ls-ltext"><div class="zh ls-hz">${L.segment(ex.hanzi, run.lesson.words).map((tok) => /^[\s\p{P}]+$/u.test(tok) ? esc(tok)
+              : `<span data-dtok="${esc(tok)}">${esc(tok)}</span>`).join("")}</div>
             <div>${colorPinyin(ex.pinyin)}</div><div class="muted">${esc(ex.english)}</div></div>${say(ex.hanzi)}</div>`).join("")}
         </div>`).join("") + (items.length ? `<h2 class="sec">Practice</h2><div id="gr-practice"><button class="btn coral" id="gr-go">Fill in the blanks (${items.length})</button></div>` : "");
       bindAudio(box);
+      box.querySelectorAll("[data-dtok]").forEach((t) => t.onclick = () => window.openDictCard && window.openDictCard(t.dataset.dtok));
       const go2 = $("#gr-go");
       if (go2) {
         const start = () => sequence($("#gr-practice"), L.makeGrammarBlanks(run.lesson, rng), blankWidget, (r, n) => doneCard($("#gr-practice"), `You got ${r} of ${n}`, start));

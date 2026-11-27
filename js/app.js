@@ -193,7 +193,7 @@ function studyQueue(deckId){
 }
 
 /* ============ router ============ */
-const SCREENS=["home","weeks","week-detail","lessons","add","study","quiz","browse","stats","settings"];
+const SCREENS=["home","weeks","week-detail","lessons","dict","add","study","quiz","browse","stats","settings"];
 let curScreen="home";
 function placeBubble(){
   const on=$("nav.tabs button.on"),b=$(".bubble");
@@ -218,6 +218,7 @@ function go(name){
   if(name==="stats")renderStats();
   if(name==="settings")renderSettings();
   if(name==="lessons"&&window.renderLessons)window.renderLessons();
+  if(name==="dict"&&window.renderDictionary)window.renderDictionary();
   window.scrollTo(0,0);
   if(syncPending&&!syncBusyScreen())syncNow();
 }
